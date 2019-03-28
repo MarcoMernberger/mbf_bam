@@ -1,0 +1,24 @@
+[package]
+name = "mbf_bam"
+version = "0.1.0"
+authors = ["Florian Finkernagel <finkernagel@imt.uni-marburg.de>"]
+edition = "2018"
+description = "Helpers to deal with BAM files"
+repository = "https://github.com/TyberiusPrime/mbf_bam"
+readme = "README.md"
+keywords = ["bam", "high troughput sequencing"]
+license = "MIT"
+
+[lib]
+crate-type=["cdylib"]
+name = "mbf_bam"
+
+[dependencies]
+failure="0.1.5"
+rust-htslib="0.22.0"
+rayon="1.0"
+
+[dependencies.pyo3]
+version = "0.6.0-alpha.4"
+features = ["extension-module"]
+
