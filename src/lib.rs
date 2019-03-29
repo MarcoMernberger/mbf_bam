@@ -47,8 +47,11 @@ fn add_hashmaps(mut a: HashMap<u32, u64>, b: HashMap<u32, u64>) -> HashMap<u32, 
 #[derive(Hash, PartialEq, Eq)]
 struct ReadAtPos {
     is_reverse: bool,
-    raw_cigar: Vec<u32>
-    //seq: Vec<u8>
+    //after a long decision, we've decided that 
+    //it's best to count based on the seq
+    //to detect pcr artificats
+    // raw_cigar: Vec<u32> 
+    seq: Vec<u8>
 }
 
 
@@ -56,8 +59,8 @@ impl std::convert::From<&bam::Record> for ReadAtPos {
     fn from (read: &bam::Record) -> ReadAtPos {
        ReadAtPos{
            is_reverse: read.is_reverse(), 
-           raw_cigar: read.raw_cigar().to_vec()
-           //seq: read.seq().as_bytes()
+           //raw_cigar: read.raw_cigar().to_vec()
+           seq: read.seq().as_bytes()
        }
     }
 
@@ -124,3 +127,5 @@ fn mbf_bam(_py: Python, m: &PyModule) -> PyResult<()> {
 
     Ok(())
 }
+//tests are in the callers until we can actually specify that we need mbf_align (and it's sample
+//data) for the testing.
