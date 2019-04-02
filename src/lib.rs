@@ -74,14 +74,9 @@ pub fn calculate_duplicate_distribution(
         Err(x) => Err(exceptions::ValueError::py_err(format!("{}", x))),
     }
 }
-/// python wrapper for py_count_reads_unstranded
-#[pyfunction]
-pub fn count_reads_unstranded(
-    filename: &str,
-    index_filename: Option<&str>,
-    intervals: &PyDict,
-) -> PyResult<HashMap<String, u32>> {
-    //convert the intervals into our interval trees
+// /convert the intervals into our interval trees
+fn py_intervals_to_trees(intervals: &PyDict) -> PyResult<HashMap<String, (count_reads::OurTree, Vec<String>)>> 
+{
     let trees: Result<HashMap<String, (count_reads::OurTree, Vec<String>)>, BamError> = intervals
         .iter()
         .map(|(chr, iv_obj)| {
@@ -94,11 +89,39 @@ pub fn count_reads_unstranded(
         Ok(trees) => trees,
         Err(x) => return Err(x.into()),
     };
+    Ok(trees)
+}
 
-    match count_reads::py_count_reads_unstranded(filename, index_filename, trees) {
+/// python wrapper for py_count_reads_unstranded
+#[pyfunction]
+pub fn count_reads_unstranded(
+    filename: &str,
+    index_filename: Option<&str>,
+    intervals: &PyDict,
+    gene_intervals: &PyDict,
+) -> PyResult<HashMap<String, u32>> {
+    let trees = py_intervals_to_trees(intervals)?;
+    let gene_trees = py_intervals_to_trees(gene_intervals)?;
+    match count_reads::py_count_reads_unstranded(filename, index_filename, trees, gene_trees) {
         Ok(x) => Ok(x),
         Err(y) => Err(y.into()),
     }
+}
+/// python wrapper for py_count_reads_stranded
+#[pyfunction]
+pub fn count_reads_stranded(
+    filename: &str,
+    index_filename: Option<&str>,
+    intervals: &PyDict,
+    gene_intervals: &PyDict,
+) -> PyResult<(HashMap<String, u32>, HashMap<String, u32>)> {
+    let trees = py_intervals_to_trees(intervals)?;
+    let gene_trees = py_intervals_to_trees(gene_intervals)?;
+    let res =  match count_reads::py_count_reads_stranded(filename, index_filename, trees, gene_trees) {
+        Ok(x) => x,
+        Err(y) => return Err(y.into()),
+    };
+    Ok(res)
 }
 
 /// This module is a python module implemented in Rust.
@@ -106,6 +129,7 @@ pub fn count_reads_unstranded(
 fn mbf_bam(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(calculate_duplicate_distribution))?;
     m.add_wrapped(wrap_pyfunction!(count_reads_unstranded))?;
+    m.add_wrapped(wrap_pyfunction!(count_reads_stranded))?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())
