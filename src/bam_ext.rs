@@ -1,5 +1,4 @@
 use rust_htslib::bam;
-use rust_htslib::prelude::*;
 use rust_htslib::bam::record::Cigar;
 
 pub trait BamRecordExtensions {
@@ -8,7 +7,6 @@ pub trait BamRecordExtensions {
 
 impl BamRecordExtensions for bam::Record {
     fn blocks(&self) -> Vec<(u32, u32)> {
-        let cs = self.cigar();
         let mut result = Vec::new();
         let mut pos = self.pos() as u32;
         for entry in self.cigar().iter() {
