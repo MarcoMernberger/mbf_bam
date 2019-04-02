@@ -13,7 +13,7 @@ use rust_htslib::prelude::*;
 use pyo3::prelude::*;
 
 use pyo3::types::{PyList, PyObjectRef, PyTuple};
-use crate::bam_ext::BamRecordExtensions;
+use crate::bam_ext::{BamRecordExtensions, open_bam};
 use crate::BamError;
 
 use std::collections::{HashMap, HashSet};
@@ -97,7 +97,7 @@ fn count_reads_in_region_unstranded(
                 } else {
                     let hs = multimapper_dedup
                         .entry(gene_no)
-                        .or_insert_with(|| HashSet::new());
+                        .or_insert_with(HashSet::new);
                     hs.insert(read.qname().to_vec());
                 }
                 /*if gene_ids[gene_no as usize] == "FBgn0037275" {
@@ -165,7 +165,7 @@ struct Chunk<'a> {
 impl<'a> Iterator for ChunkedGenomeIterator<'a> {
     type Item = Chunk<'a>;
     fn next(&mut self) -> Option<Chunk<'a>> {
-        let chunk_size = 1000000;
+        let chunk_size = 1_000_000;
         if self.last_start >= self.last_chr_length {
             let next_chr = match self.it.next() {
                 Some(x) => x,
@@ -190,7 +190,7 @@ impl<'a> Iterator for ChunkedGenomeIterator<'a> {
             //and if they have the same gene_no -> advance...
             //right is easy, just find (stop..length) and take only the next()
             //left is more difficult.
-            let overlapping = next_tree.find(stop..stop + 1).next();
+            let overlapping = next_tree.find(stop..stop+1).next();
             match overlapping {
                 None => break,
                 Some(entry) => {
@@ -205,7 +205,7 @@ impl<'a> Iterator for ChunkedGenomeIterator<'a> {
             tree: next_tree,
             gene_ids: next_gene_ids,
             start: self.last_start,
-            stop: stop,
+            stop,
         };
         self.last_start = stop;
         Some(c)
@@ -218,31 +218,18 @@ pub fn py_count_reads_unstranded(
     index_filename: Option<&str>,
     trees: HashMap<String, (OurTree, Vec<String>)>,
 ) -> Result<HashMap<String, u32>, BamError> {
-    //check whether the bam file can be opend
-    let bam = match index_filename {
-        Some(ifn) => bam::IndexedReader::from_path_and_index(filename, ifn),
-        _ => bam::IndexedReader::from_path(filename),
-    };
-    let bam = match bam {
-        Ok(x) => x,
-        Err(e) => {
-            return Err(BamError::UnknownError {
-                msg: format!("Could not read bam: {}", e),
-            }
-            .into());
-        }
-    };
+    //check whether the bam file can be openend
+    //and we need it for the chunking
+    let bam = open_bam(filename, index_filename)?;
+    
     //perform the counting
     let cg = ChunkedGenome::new(trees, bam); // can't get the ParallelBridge to work with our lifetimes.
     let it: Vec<Chunk> = cg.iter().collect();
     let result = it
         .into_par_iter()
         .map(|chunk| {
-            let bam = match index_filename {
-                Some(ifn) => bam::IndexedReader::from_path_and_index(filename, ifn).unwrap(),
-                _ => bam::IndexedReader::from_path(filename).unwrap(),
-            };
-
+          let bam = open_bam(filename, index_filename).unwrap();
+            
             let counts = count_reads_in_region_unstranded(
                 bam,
                 &chunk.tree,
@@ -268,7 +255,7 @@ pub fn py_count_reads_unstranded(
             result.insert(format!("_{}", chunk.chr), total);
             result
         })
-        .reduce(|| HashMap::<String, u32>::new(), add_hashmaps);
+        .reduce(HashMap::<String, u32>::new, add_hashmaps);
     //.fold(HashMap::<String, u32>::new(), add_hashmaps);
     Ok(result)
 }

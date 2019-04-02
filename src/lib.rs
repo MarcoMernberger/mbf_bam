@@ -81,7 +81,6 @@ pub fn count_reads_unstranded(
     index_filename: Option<&str>,
     intervals: &PyDict,
 ) -> PyResult<HashMap<String, u32>> {
-    //check whether the bam file can be opend
     //convert the intervals into our interval trees
     let trees: Result<HashMap<String, (count_reads::OurTree, Vec<String>)>, BamError> = intervals
         .iter()
@@ -97,9 +96,9 @@ pub fn count_reads_unstranded(
     };
 
     match count_reads::py_count_reads_unstranded(filename, index_filename, trees) {
-        Ok(x) => return Ok(x),
-        Err(y) => return Err(y.into()),
-    };
+        Ok(x) => Ok(x),
+        Err(y) => Err(y.into()),
+    }
 }
 
 /// This module is a python module implemented in Rust.

@@ -17,6 +17,7 @@ name = "mbf_bam"
 failure="0.1.5"
 rayon="1.0"
 bio = "0.25.0"
+#rust-htslib="0.22.0"
 
 
 [dependencies.pyo3]
@@ -26,3 +27,4 @@ features = ["extension-module"]
 
 [dependencies.rust-htslib]
 path = "../rust-htslib"
+#git = "https://github.com/rust-bio/rust-htslib/"

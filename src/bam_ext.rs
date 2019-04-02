@@ -1,6 +1,28 @@
+use crate::BamError;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
 
+
+
+/// Wrapper for opening a BAM file.
+pub fn open_bam(
+    bam_filename: &str,
+    bai_filename: Option<&str>,
+) -> Result<bam::IndexedReader, BamError> {
+    let bam = match bai_filename {
+        Some(ifn) => 
+          bam::IndexedReader::from_path_and_index(bam_filename, ifn),
+        _ => bam::IndexedReader::from_path(bam_filename),
+    };
+    match bam {
+      Ok(x) => Ok(x),
+      Err(e) => 
+            Err(BamError::UnknownError {
+                msg: format!("Could not read bam: {}", e),
+            }
+            .into())
+    }
+}
 pub trait BamRecordExtensions {
     fn blocks(&self) -> Vec<(u32, u32)>;
 }
@@ -12,16 +34,16 @@ impl BamRecordExtensions for bam::Record {
         for entry in self.cigar().iter() {
             match entry {
                 Cigar::Match(len) => {
-                    result.push((pos ,pos + len));
+                    result.push((pos, pos + len));
                     pos += len;
-                },
+                }
                 Cigar::Del(len) => pos += len,
                 Cigar::RefSkip(len) => pos += len,
-                _ => ()
+                _ => (),
             }
         }
         result
-  }
+    }
 }
 
 #[cfg(test)]

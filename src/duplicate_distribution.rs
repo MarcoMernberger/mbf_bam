@@ -3,6 +3,7 @@ use rayon::prelude::*;
 use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use std::collections::HashMap;
+use crate::bam_ext::open_bam;
 
 fn add_hashmaps(mut a: HashMap<u32, u64>, b: HashMap<u32, u64>) -> HashMap<u32, u64> {
     for (k, v) in b.iter() {
@@ -44,20 +45,14 @@ pub fn py_calculate_duplicate_distribution(
     filename: &str,
     index_filename: Option<&str>,
 ) -> Result<HashMap<u32, u64>, Error> {
-    let bam = match index_filename {
-        Some(ifn) => bam::IndexedReader::from_path_and_index(filename, ifn)?,
-        _ => bam::IndexedReader::from_path(filename)?,
-    };
+    let bam = open_bam(filename, index_filename)?;
 
     let it = 0..bam.header().target_count();
     let result = it
         .into_par_iter()
         .map(|tid| {
-            let mut bam2 = match index_filename {
-                Some(ifn) => bam::IndexedReader::from_path_and_index(filename, ifn).unwrap(),
-                _ => bam::IndexedReader::from_path(filename).unwrap(),
-            };
-
+            let mut bam2 = open_bam(filename, index_filename).unwrap();
+            
             bam2.fetch(tid, 0, bam2.header().target_len(tid).unwrap())
                 .unwrap();
             let mut counts: HashMap<u32, u64> = HashMap::new();
@@ -83,6 +78,6 @@ pub fn py_calculate_duplicate_distribution(
             }
             counts
         })
-        .reduce(|| HashMap::<u32, u64>::new(), add_hashmaps);
+        .reduce(HashMap::<u32, u64>::new, add_hashmaps);
     Ok(result)
 }
