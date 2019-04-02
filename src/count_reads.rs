@@ -252,7 +252,6 @@ struct ChunkedGenomeIterator<'a> {
 struct Chunk<'a> {
     chr: String,
     tid: u32,
-    tree: &'a OurTree,
     gene_ids: &'a Vec<String>,
     start: u32,
     stop: u32,
@@ -261,7 +260,7 @@ struct Chunk<'a> {
 impl<'a> Iterator for ChunkedGenomeIterator<'a> {
     type Item = Chunk<'a>;
     fn next(&mut self) -> Option<Chunk<'a>> {
-        let chunk_size = 10000;
+        let chunk_size = 1000000;
         if self.last_start >= self.last_chr_length {
             let next_chr = match self.it.next() {
                 Some(x) => x,
@@ -298,7 +297,6 @@ impl<'a> Iterator for ChunkedGenomeIterator<'a> {
         let c = Chunk {
             chr: self.last_chr.clone(),
             tid: self.last_tid,
-            tree: next_tree,
             gene_ids: next_gene_ids,
             start: self.last_start,
             stop,
@@ -406,7 +404,7 @@ pub fn py_count_reads_stranded(
             )
         })
         .reduce(
-            || (HashMap::<String, u32>::new(), HashMap::<String, u32>::new()),
+            || {(HashMap::<String, u32>::new(), HashMap::<String, u32>::new())},
             add_dual_hashmaps,
         );
     //.fold(HashMap::<String, u32>::new(), add_hashmaps);

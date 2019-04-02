@@ -151,6 +151,28 @@ def in_rust_exon_stranded():
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
 
+def in_python_exon_smart_stranded():
+    import mbf_genomics
+
+    ppg.util.global_pipegraph = None
+    dummy = Dummy(genome, bam_name)
+    genes = mbf_genomics.genes.Genes(genome)
+    ac = mbf_genomics.genes.anno_tag_counts.ExonSmartStrandedPython(dummy)
+    ac.count_strategy.disable_sanity_check = True
+    genes += ac
+    return genes.df.set_index("gene_stable_id")[ac.columns[0]]
+
+
+def in_rust_exon_smart_stranded():
+    import mbf_genomics
+
+    ppg.util.global_pipegraph = None
+    dummy = Dummy(genome, bam_name)
+    genes = mbf_genomics.genes.Genes(genome)
+    ac = mbf_genomics.genes.anno_tag_counts.ExonSmartStrandedRust(dummy)
+    genes += ac
+    return genes.df.set_index("gene_stable_id")[ac.columns[0]]
+
 
 def check_results(py, rust):
     if (rust == py).all():
@@ -168,10 +190,15 @@ def check_results(py, rust):
     print("ok", ok, "err", err)
 
 
-for p in ("result_rust_exon_stranded.pickle", "time_rust_exon_stranded.txt"):
+for p in ("result_rust_exon_smart_stranded.pickle", "time_rust_exon_smart_stranded.txt"):
     p = Path(p)
     if p.exists():
         p.unlink()
+
+py = do_time("python_exon_smart_stranded", in_python_exon_smart_stranded)
+rust = do_time("rust_exon_smart_stranded", in_rust_exon_smart_stranded)
+check_results(py, rust)
+
 
 py = do_time("python_exon_stranded", in_python_exon_stranded)
 rust = do_time("rust_exon_stranded", in_rust_exon_stranded)
