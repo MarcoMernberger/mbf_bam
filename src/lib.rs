@@ -12,7 +12,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyObjectRef, PyTuple};
 use pyo3::wrap_pyfunction;
 use pyo3::{exceptions, PyErr, PyResult};
+use rayon::iter::ParallelBridge;
+use rayon::prelude::ParallelIterator;
 use rayon::prelude::*;
+
 use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -109,11 +112,6 @@ fn build_tree(iv_obj: &PyObjectRef) -> Result<(OurTree, Vec<String>), PyErr> {
         }
         last_gene_no = gene_no;
     }
-    println!(
-        "len gene_ids = {}, last gene_no: {}",
-        gene_ids.len(),
-        last_gene_no
-    );
     Ok((tree, gene_ids))
 }
 
@@ -124,34 +122,144 @@ fn count_reads(
     start: u32,
     stop: u32,
     gene_count: u32,
+    gene_ids: &Vec<String>
 ) -> Result<Vec<u32>, BamError> {
     let mut result = vec![0; gene_count as usize];
+    let mut multimapper_dedup: HashMap<u32, HashSet<Vec<u8>>> = HashMap::new();
+    let mut gene_nos_seen = HashSet::<u32>::new();
     let mut read: bam::Record = bam::Record::new();
     bam.fetch(tid, start, stop)?;
-    let mut multimapper_dedup: HashMap<u32, HashSet<Vec<u8>>> = HashMap::new();
     while let Ok(_) = bam.read(&mut read) {
         let blocks = read.blocks();
+        // do not count multiple blocks matching in one gene multiple times
+        gene_nos_seen.clear();
         for iv in blocks.iter() {
+            if (iv.1 < start) || iv.0 >= stop || ((iv.0 < start) && (iv.1 >= start)) {
+                // if this block is outside of the region
+                // don't count it at all.
+                // if it is on a block boundary
+                // only count it for the left side.
+                // which is ok, since we place the blocks to the right
+                // of our intervals.
+                continue;
+            }
             for r in tree.find(iv.0..iv.1) {
                 let entry = r.data();
                 let gene_no = (*entry).0;
                 let nh = read.aux(b"NH");
                 let nh = nh.map_or(1, |aux| aux.integer());
-                if (nh == 1) {
-                    result[gene_no as usize] += 1;
+                if nh == 1 {
+                    gene_nos_seen.insert(gene_no);
                 } else {
                     let hs = multimapper_dedup
                         .entry(gene_no)
                         .or_insert_with(|| HashSet::new());
                     hs.insert(read.qname().to_vec());
                 }
+                /*if gene_ids[gene_no as usize] == "FBgn0037275" {
+                println!(
+                    "{}, {}, {}",
+                    start,
+                    stop,
+                    std::str::from_utf8(read.qname()).unwrap()
+                );
+                }*/
             }
+        }
+        for gene_no in gene_nos_seen.iter() {
+            result[*gene_no as usize] += 1;
         }
     }
     for (gene_no, hs) in multimapper_dedup.iter() {
         result[*gene_no as usize] += hs.len() as u32;
     }
     Ok(result)
+}
+
+struct ChunkedGenome {
+    trees: HashMap<String, (OurTree, Vec<String>)>,
+    bam: bam::IndexedReader,
+}
+
+impl ChunkedGenome {
+    fn new(
+        trees: HashMap<String, (OurTree, Vec<String>)>,
+        bam: bam::IndexedReader,
+    ) -> ChunkedGenome {
+        ChunkedGenome { trees, bam }
+    }
+
+    fn iter(&self) -> ChunkedGenomeIterator {
+        ChunkedGenomeIterator {
+            cg: &self,
+            it: self.trees.iter(),
+            last_start: 0,
+            last_tid: 0,
+            last_chr_length: 0,
+            last_chr: "".to_string(),
+        }
+    }
+}
+
+struct ChunkedGenomeIterator<'a> {
+    cg: &'a ChunkedGenome,
+    it: std::collections::hash_map::Iter<'a, String, (OurTree, Vec<String>)>,
+    last_start: u32,
+    last_chr: String,
+    last_tid: u32,
+    last_chr_length: u32,
+}
+struct Chunk<'a> {
+    chr: String,
+    tid: u32,
+    tree: &'a OurTree,
+    gene_ids: &'a Vec<String>,
+    start: u32,
+    stop: u32,
+}
+
+impl<'a> Iterator for ChunkedGenomeIterator<'a> {
+    type Item = Chunk<'a>;
+    fn next(&mut self) -> Option<Chunk<'a>> {
+        let chunk_size = 1000000;
+        if self.last_start >= self.last_chr_length {
+            let (next_chr, (next_tree, next_gene_ids)) = match self.it.next() {
+                Some(x) => x,
+                None => return None,
+            };
+            let tid = self.cg.bam.header().tid(next_chr.as_bytes()).unwrap();
+            let chr_length = self.cg.bam.header().target_len(tid).unwrap();
+            self.last_tid = tid;
+            self.last_chr_length = chr_length;
+            self.last_chr = next_chr.to_string();
+            self.last_start = 0;
+        }
+
+        let (next_tree, next_gene_ids) = self.cg.trees.get(&self.last_chr).unwrap();
+        let mut stop = self.last_start + chunk_size;
+        while true {
+            //TODO: migh have to extend this for exon based counting to not
+            //cut gene in half?
+            let overlapping = next_tree.find(stop..stop + 1).next();
+            match (overlapping) {
+                None => break,
+                Some(entry) => {
+                    let iv = entry.interval();
+                    stop = iv.end + 1;
+                }
+            }
+        }
+        let c = Chunk {
+            chr: self.last_chr.clone(),
+            tid: self.last_tid,
+            tree: next_tree,
+            gene_ids: next_gene_ids,
+            start: self.last_start,
+            stop: stop,
+        };
+        self.last_start = stop;
+        Some(c)
+    }
 }
 
 /// python wrapper for py_count_reads_unstranded
@@ -166,8 +274,8 @@ pub fn count_reads_unstranded(
         Some(ifn) => bam::IndexedReader::from_path_and_index(filename, ifn),
         _ => bam::IndexedReader::from_path(filename),
     };
-    match bam {
-        Ok(_) => (),
+    let bam = match bam {
+        Ok(x) => x,
         Err(e) => {
             return Err(BamError::UnknownError {
                 msg: format!("Could not read bam: {}", e),
@@ -189,24 +297,31 @@ pub fn count_reads_unstranded(
         Err(x) => return Err(x.into()),
     };
     //perform the counting
-    let result = trees
+    let cg = ChunkedGenome::new(trees, bam);
+    let it: Vec<Chunk> = cg.iter().collect();
+    let result = it
         .into_par_iter()
-        .map(|(chr, (tree, gene_ids))| {
-            println!("handling {}", chr);
+        .map(|chunk| {
             let bam = match index_filename {
                 Some(ifn) => bam::IndexedReader::from_path_and_index(filename, ifn).unwrap(),
                 _ => bam::IndexedReader::from_path(filename).unwrap(),
             };
 
-            let tid = bam.header().tid(chr.as_bytes()).unwrap();
-            let chr_length = bam.header().target_len(tid).unwrap();
-            let counts = count_reads(bam, &tree, tid, 0, chr_length, gene_ids.len() as u32);
+            let counts = count_reads(
+                bam,
+                &chunk.tree,
+                chunk.tid,
+                chunk.start,
+                chunk.stop,
+                chunk.gene_ids.len() as u32,
+                &chunk.gene_ids,
+            );
             let mut total = 0;
             let mut result: HashMap<String, u32> = match counts {
                 Ok(counts) => {
                     let mut res = HashMap::new();
                     for (gene_no, cnt) in counts.iter().enumerate() {
-                        let gene_id = &gene_ids[gene_no];
+                        let gene_id = &chunk.gene_ids[gene_no];
                         res.insert(gene_id.to_string(), *cnt);
                         total += cnt;
                     }
@@ -215,12 +330,11 @@ pub fn count_reads_unstranded(
                 _ => HashMap::new(),
             };
             result.insert("_total".to_string(), total);
-            result.insert(format!("_{}", chr), total);
-            println!("done {}", chr);
+            result.insert(format!("_{}", chunk.chr), total);
             result
         })
-        .reduce(||HashMap::<String, u32>::new(), add_hashmaps);
-        //.fold(HashMap::<String, u32>::new(), add_hashmaps);
+        .reduce(|| HashMap::<String, u32>::new(), add_hashmaps);
+    //.fold(HashMap::<String, u32>::new(), add_hashmaps);
     Ok(result)
 }
 

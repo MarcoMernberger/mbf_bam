@@ -110,10 +110,12 @@ for p in ("result_rust_gene_unstranded.pickle",
 rust = do_time('rust_gene_unstranded', in_rust_unstranded)
 ok = 0
 err = 0
-for stable_id in genome.df_genes[genome.df_genes['chr'] == '4'].index:
+#for stable_id in genome.df_genes[genome.df_genes.chr == '3L'].index:
+#for stable_id in ['FBgn0035181']:
+for stable_id in genome.df_genes.index:
     if py[stable_id] == rust[stable_id]:
         ok += 1
-    else:
+    elif rust[stable_id] > 0:
         print(stable_id, py[stable_id], rust[stable_id])
         err += 1
 print("ok", ok, 'err', err)
