@@ -1,0 +1,122 @@
+from pathlib import Path
+import pysam
+import pickle
+import time
+import pypipegraph as ppg
+import mbf_genomes
+import os
+
+work_dir = Path("_benchmark_read_counting")
+work_dir.mkdir(exist_ok=True)
+os.chdir(work_dir)
+
+bam_name = (
+    Path("results")
+    / "aligned"
+    / "STAR_2.6.1d"
+    / 'Drosophila_melanogaster_94'
+    / "ERR2984187"
+    / "ERR2984187.bam"
+)
+
+if not bam_name.exists():
+    #leverage pipeline to get some sample data
+
+    import mbf_align
+    import mbf_externals
+
+    ppg.new_pipegraph()
+
+    genome = mbf_genomes.EnsemblGenome("Drosophila_melanogaster", 94)
+    aligner = mbf_externals.aligners.STAR()
+
+    #just some random drospohila lane.
+    samples = {"ERR2984187": "ERR2984187"}
+    raw = {
+        name: mbf_align.Sample(
+            name,
+            mbf_align.strategies.FASTQsFromAccession(err),
+            reverse_reads=False,
+            pairing="only_first",
+        )
+        for name, err in samples.items()
+    }
+
+    aligned = {lane.name: lane.align(aligner, genome, {}) for lane in raw.values()}
+    ppg.run_pipegraph()
+
+
+def do_time(description, callback):
+    p = Path('time_%s.txt'  % description)
+    rp = Path('result_%s.pickle'  % description)
+    if not p.exists():
+        start = time.time()
+        e = None
+        try:
+            result = callback()
+        except Exception as ex:
+            print('caught') 
+            e = ex
+            pass
+        stop = time.time()
+        print(description, "%.2f" % (stop - start), '(new)', sep="\t")
+        if not e:
+            p.write_text("%.2f" % (stop - start))
+            with open(rp, 'wb') as op:
+                pickle.dump(result, op)
+        else:
+            raise e
+    else:
+        print(description, p.read_text(), '(cached)', sep="\t")
+    return pickle.load(open(rp, 'rb'))
+
+class Dummy:
+    name = "lane"
+    vid = None
+    def __init__(self, genome, bam_name):
+        self.genome = genome
+        self.bam_name = bam_name
+    def get_bam(self):
+        return pysam.Samfile(self.bam_name)
+
+genome = mbf_genomes.EnsemblGenome("Drosophila_melanogaster", 94)
+def in_python_unstranded():
+    import mbf_genomics
+    ppg.util.global_pipegraph = None
+    dummy = Dummy(genome, bam_name)
+    genes = mbf_genomics.genes.Genes(genome)
+    ac = mbf_genomics.genes.anno_tag_counts.GeneUnstrandedPython(dummy)
+    genes += ac
+    return genes.df.set_index('gene_stable_id')[ac.columns[0]]
+
+def in_rust_unstranded():
+    import mbf_genomics
+    ppg.util.global_pipegraph = None
+    dummy = Dummy(genome, bam_name)
+    genes = mbf_genomics.genes.Genes(genome)
+    ac = mbf_genomics.genes.anno_tag_counts.GeneUnstrandedRust(dummy)
+    genes += ac
+    return genes.df.set_index('gene_stable_id')[ac.columns[0]]
+
+py = do_time('python_gene_unstranded', in_python_unstranded)
+for p in ("result_rust_gene_unstranded.pickle",
+          "time_rust_gene_unstranded.txt",):
+    p = Path(p)
+    if p.exists():
+        p.unlink()
+    else:
+        print("non existing", p)
+
+rust = do_time('rust_gene_unstranded', in_rust_unstranded)
+ok = 0
+err = 0
+for stable_id in genome.df_genes[genome.df_genes['chr'] == '4'].index:
+    if py[stable_id] == rust[stable_id]:
+        ok += 1
+    else:
+        print(stable_id, py[stable_id], rust[stable_id])
+        err += 1
+print("ok", ok, 'err', err)
+
+
+

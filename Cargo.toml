@@ -15,10 +15,14 @@ name = "mbf_bam"
 
 [dependencies]
 failure="0.1.5"
-rust-htslib="0.22.0"
 rayon="1.0"
+bio = "0.25.0"
+
 
 [dependencies.pyo3]
 version = "0.6.0-alpha.4"
 features = ["extension-module"]
 
+
+[dependencies.rust-htslib]
+path = "../rust-htslib"
