@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn spliced_reads() {
-        let mut bam = bam::Reader::from_path("sample_data/spliced_reads.bam").unwrap();
+        let mut bam = bam::Reader::from_path("../mbf_sampledata/src/mbf_sample_data/data/mbf_bam/spliced_reads.bam").unwrap();
         let mut it = bam.records();
         let blocks = it.next().expect("iter").unwrap().blocks();
         //6S45M - 0

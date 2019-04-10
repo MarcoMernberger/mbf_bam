@@ -126,6 +126,7 @@ def in_rust_stranded():
     dummy = Dummy(genome, bam_name)
     genes = mbf_genomics.genes.Genes(genome)
     ac = mbf_genomics.genes.anno_tag_counts.GeneStrandedRust(dummy)
+    ac.count_strategy.disable_sanity_check = True
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
 
@@ -148,6 +149,7 @@ def in_rust_exon_stranded():
     dummy = Dummy(genome, bam_name)
     genes = mbf_genomics.genes.Genes(genome)
     ac = mbf_genomics.genes.anno_tag_counts.ExonStrandedRust(dummy)
+    ac.count_strategy.disable_sanity_check = True
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
 
@@ -170,6 +172,7 @@ def in_rust_exon_smart_stranded():
     dummy = Dummy(genome, bam_name)
     genes = mbf_genomics.genes.Genes(genome)
     ac = mbf_genomics.genes.anno_tag_counts.ExonSmartStrandedRust(dummy)
+    ac.count_strategy.disable_sanity_check = True
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
 

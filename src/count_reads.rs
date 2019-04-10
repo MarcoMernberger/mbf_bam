@@ -1,6 +1,6 @@
 use bio::data_structures::interval_tree::IntervalTree;
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyObjectRef, PyTuple};
+use pyo3::types::{PyList, PyAny, PyTuple};
 use rayon::prelude::*;
 use rust_htslib::bam;
 use rust_htslib::prelude::*;
@@ -32,7 +32,7 @@ fn add_dual_hashmaps(
 
 /// OurTree stores an interval tree
 /// a gene_no (ie. an index into a vector of gene_ids)
-/// and the strand (+1/ -1)
+/// and the strand (+1/ -1, 0)
 pub type OurTree = IntervalTree<u32, (u32, i8)>;
 
 /// build_tree converts an list of python intervals
@@ -41,7 +41,7 @@ pub type OurTree = IntervalTree<u32, (u32, i8)>;
 /// python intervals are a list of tuples
 /// (gene_stable_id, strand, start, stop)
 /// - each reference sequence has it's own list.
-pub fn build_tree(iv_obj: &PyObjectRef) -> Result<(OurTree, Vec<String>), PyErr> {
+pub fn build_tree(iv_obj: &PyAny) -> Result<(OurTree, Vec<String>), PyErr> {
     let iv_list: &PyList = iv_obj.extract()?;
     let mut tree = IntervalTree::new();
     let mut gene_ids = Vec::new();
@@ -72,48 +72,60 @@ fn count_reads_in_region_unstranded(
     start: u32,
     stop: u32,
     gene_count: u32,
-) -> Result<Vec<u32>, BamError> {
+) -> Result<(Vec<u32>, u32), BamError> {
     let mut result = vec![0; gene_count as usize];
     let mut multimapper_dedup: HashMap<u32, HashSet<Vec<u8>>> = HashMap::new();
     let mut gene_nos_seen = HashSet::<u32>::new();
+    let mut outside_count = 0;
     let mut read: bam::Record = bam::Record::new();
     bam.fetch(tid, start, stop)?;
     while let Ok(_) = bam.read(&mut read) {
-        let blocks = read.blocks();
         // do not count multiple blocks matching in one gene multiple times
         gene_nos_seen.clear();
-        for iv in blocks.iter() {
-            if (iv.1 < start) || iv.0 >= stop || ((iv.0 < start) && (iv.1 >= start)) {
-                // if this block is outside of the region
-                // don't count it at all.
-                // if it is on a block boundary
-                // only count it for the left side.
-                // which is ok, since we place the blocks to the right
-                // of our intervals.
-                continue;
-            }
-            for r in tree.find(iv.0..iv.1) {
-                let entry = r.data();
-                let gene_no = (*entry).0;
-                let nh = read.aux(b"NH");
-                let nh = nh.map_or(1, |aux| aux.integer());
-                if nh == 1 {
-                    gene_nos_seen.insert(gene_no);
-                } else {
-                    let hs = multimapper_dedup
-                        .entry(gene_no)
-                        .or_insert_with(HashSet::new);
-                    hs.insert(read.qname().to_vec());
+        let mut hit = false;
+        let mut skipped = false;
+        if ((read.pos() as u32) < start) || ((read.pos() as u32) >= stop) {
+            skipped = true;
+        }
+        if !skipped {
+            let blocks = read.blocks();
+            for iv in blocks.iter() {
+                if (iv.1 < start) || iv.0 >= stop || ((iv.0 < start) && (iv.1 >= start)) {
+                    // if this block is outside of the region
+                    // don't count it at all.
+                    // if it is on a block boundary
+                    // only count it for the left side.
+                    // which is ok, since we place the blocks to the right
+                    // of our intervals.
+                    continue;
                 }
-                /*if gene_ids[gene_no as usize] == "FBgn0037275" {
-                println!(
-                    "{}, {}, {}",
-                    start,
-                    stop,
-                    std::str::from_utf8(read.qname()).unwrap()
-                );
-                }*/
+                for r in tree.find(iv.0..iv.1) {
+                    hit = true;
+                    let entry = r.data();
+                    let gene_no = (*entry).0;
+                    let nh = read.aux(b"NH");
+                    let nh = nh.map_or(1, |aux| aux.integer());
+                    if nh == 1 {
+                        gene_nos_seen.insert(gene_no);
+                    } else {
+                        let hs = multimapper_dedup
+                            .entry(gene_no)
+                            .or_insert_with(HashSet::new);
+                        hs.insert(read.qname().to_vec());
+                    }
+                    /*if gene_ids[gene_no as usize] == "FBgn0037275" {
+                    println!(
+                        "{}, {}, {}",
+                        start,
+                        stop,
+                        std::str::from_utf8(read.qname()).unwrap()
+                    );
+                    }*/
+                }
             }
+        }
+        if !hit && !skipped {
+            outside_count += 1;
         }
         for gene_no in gene_nos_seen.iter() {
             result[*gene_no as usize] += 1;
@@ -122,7 +134,7 @@ fn count_reads_in_region_unstranded(
     for (gene_no, hs) in multimapper_dedup.iter() {
         result[*gene_no as usize] += hs.len() as u32;
     }
-    Ok(result)
+    Ok((result, outside_count))
 }
 ///
 /// count_reads_in_region_stranded
@@ -138,67 +150,72 @@ fn count_reads_in_region_stranded(
     start: u32,
     stop: u32,
     gene_count: u32,
-) -> Result<(Vec<u32>, Vec<u32>), BamError> {
+    each_read_counts_once: bool,
+) -> Result<(Vec<u32>, Vec<u32>, u32), BamError> {
     let mut result_forward = vec![0; gene_count as usize];
     let mut result_reverse = vec![0; gene_count as usize];
     let mut multimapper_dedup_forward: HashMap<u32, HashSet<Vec<u8>>> = HashMap::new();
     let mut multimapper_dedup_reverse: HashMap<u32, HashSet<Vec<u8>>> = HashMap::new();
     let mut gene_nos_seen_forward = HashSet::<u32>::new();
     let mut gene_nos_seen_reverse = HashSet::<u32>::new();
+    let mut outside_count = 0;
     let mut read: bam::Record = bam::Record::new();
     bam.fetch(tid, start, stop)?;
     while let Ok(_) = bam.read(&mut read) {
-        let blocks = read.blocks();
         // do not count multiple blocks matching in one gene multiple times
         gene_nos_seen_forward.clear();
         gene_nos_seen_reverse.clear();
-        for iv in blocks.iter() {
-            if (iv.1 < start) || iv.0 >= stop || ((iv.0 < start) && (iv.1 >= start)) {
-                // if this block is outside of the region
-                // don't count it at all.
-                // if it is on a block boundary
-                // only count it for the left side.
-                // which is ok, since we place the blocks to the right
-                // of our intervals.
-                continue;
-            }
-            for r in tree.find(iv.0..iv.1) {
-                let entry = r.data();
-                let gene_no = (*entry).0;
-                let strand = (*entry).1; // this is 1 or -1
-                let nh = read.aux(b"NH");
-                let nh = nh.map_or(1, |aux| aux.integer());
-                if ((strand == 1) && !read.is_reverse()) || ((strand != 1) && read.is_reverse()) {
-                    // read is in correct orientation
-                    if nh == 1 {
-                        gene_nos_seen_forward.insert(gene_no);
+        let mut hit = false;
+        let mut skipped = false;
+        if ((read.pos() as u32) < start) || ((read.pos() as u32) >= stop) {
+            skipped = true;
+        }
+        if !skipped {
+            let blocks = read.blocks();
+            for iv in blocks.iter() {
+                for r in tree.find(iv.0..iv.1) {
+                    hit = true;
+                    let entry = r.data();
+                    let gene_no = (*entry).0;
+                    let strand = (*entry).1; // this is 1 or -1
+                    let nh = read.aux(b"NH");
+                    let nh = nh.map_or(1, |aux| aux.integer());
+                    if ((strand == 1) && !read.is_reverse()) || ((strand != 1) && read.is_reverse())
+                    {
+                        // read is in correct orientation
+                        if nh == 1 {
+                            gene_nos_seen_forward.insert(gene_no);
+                        } else {
+                            let hs = multimapper_dedup_forward
+                                .entry(gene_no)
+                                .or_insert_with(HashSet::new);
+                            hs.insert(read.qname().to_vec());
+                        }
                     } else {
-                        let hs = multimapper_dedup_forward
-                            .entry(gene_no)
-                            .or_insert_with(HashSet::new);
-                        hs.insert(read.qname().to_vec());
+                        // read is in inverse orientation
+                        if nh == 1 {
+                            gene_nos_seen_reverse.insert(gene_no);
+                        } else {
+                            let hs = multimapper_dedup_reverse
+                                .entry(gene_no)
+                                .or_insert_with(HashSet::new);
+                            hs.insert(read.qname().to_vec());
+                        }
                     }
-                } else {
-                    // read is in inverse orientation
-                    if nh == 1 {
-                        gene_nos_seen_reverse.insert(gene_no);
-                    } else {
-                        let hs = multimapper_dedup_reverse
-                            .entry(gene_no)
-                            .or_insert_with(HashSet::new);
-                        hs.insert(read.qname().to_vec());
+                    if each_read_counts_once {
+                        break; // enable this (part 1 of 2) for each read hitting only once
+                    }
+                }
+                if each_read_counts_once {
+                    if hit {
+                        //enable this (part 2 of 2) for each read hitting only once
+                        break;
                     }
                 }
             }
-
-            /*if gene_ids[gene_no as usize] == "FBgn0037275" {
-            println!(
-                "{}, {}, {}",
-                start,
-                stop,
-                std::str::from_utf8(read.qname()).unwrap()
-            );
-            }*/
+        }
+        if !hit && !skipped {
+            outside_count += 1;
         }
         for gene_no in gene_nos_seen_forward.iter() {
             result_forward[*gene_no as usize] += 1;
@@ -213,7 +230,7 @@ fn count_reads_in_region_stranded(
     for (gene_no, hs) in multimapper_dedup_reverse.iter() {
         result_reverse[*gene_no as usize] += hs.len() as u32;
     }
-    Ok((result_forward, result_reverse))
+    Ok((result_forward, result_reverse, outside_count))
 }
 
 struct ChunkedGenome {
@@ -249,18 +266,17 @@ struct ChunkedGenomeIterator<'a> {
     last_tid: u32,
     last_chr_length: u32,
 }
-struct Chunk<'a> {
+struct Chunk {
     chr: String,
     tid: u32,
-    gene_ids: &'a Vec<String>,
     start: u32,
     stop: u32,
 }
 
 impl<'a> Iterator for ChunkedGenomeIterator<'a> {
-    type Item = Chunk<'a>;
-    fn next(&mut self) -> Option<Chunk<'a>> {
-        let chunk_size = 1000000;
+    type Item = Chunk;
+    fn next(&mut self) -> Option<Chunk> {
+        let chunk_size = 1_000_000;
         if self.last_start >= self.last_chr_length {
             let next_chr = match self.it.next() {
                 Some(x) => x,
@@ -274,7 +290,7 @@ impl<'a> Iterator for ChunkedGenomeIterator<'a> {
             self.last_start = 0;
         }
 
-        let (next_tree, next_gene_ids) = self.cg.trees.get(&self.last_chr).unwrap();
+        let (next_tree, _next_gene_ids) = self.cg.trees.get(&self.last_chr).unwrap();
         let mut stop = self.last_start + chunk_size;
         loop {
             //TODO: migh have to extend this for exon based counting to not
@@ -297,7 +313,6 @@ impl<'a> Iterator for ChunkedGenomeIterator<'a> {
         let c = Chunk {
             chr: self.last_chr.clone(),
             tid: self.last_tid,
-            gene_ids: next_gene_ids,
             start: self.last_start,
             stop,
         };
@@ -324,30 +339,34 @@ pub fn py_count_reads_unstranded(
         .into_par_iter()
         .map(|chunk| {
             let bam = open_bam(filename, index_filename).unwrap();
+            let (tree, gene_ids) = trees.get(&chunk.chr).unwrap();
 
             let counts = count_reads_in_region_unstranded(
                 bam,
                 //&chunk.tree,
-                &trees.get(&chunk.chr).unwrap().0,
+                tree,
                 chunk.tid,
                 chunk.start,
                 chunk.stop,
-                chunk.gene_ids.len() as u32,
+                gene_ids.len() as u32,
             );
             let mut total = 0;
+            let mut outside = 0;
             let mut result: HashMap<String, u32> = match counts {
                 Ok(counts) => {
                     let mut res = HashMap::new();
-                    for (gene_no, cnt) in counts.iter().enumerate() {
-                        let gene_id = &chunk.gene_ids[gene_no];
+                    for (gene_no, cnt) in counts.0.iter().enumerate() {
+                        let gene_id = &gene_ids[gene_no];
                         res.insert(gene_id.to_string(), *cnt);
                         total += cnt;
                     }
+                    outside += counts.1;
                     res
                 }
                 _ => HashMap::new(),
             };
             result.insert("_total".to_string(), total);
+            result.insert("_outside".to_string(), outside);
             result.insert(format!("_{}", chunk.chr), total);
             result
         })
@@ -361,7 +380,7 @@ fn to_hashmap(counts: Vec<u32>, gene_ids: &Vec<String>, chr: &str) -> HashMap<St
     let mut result = HashMap::new();
     for (gene_no, cnt) in counts.iter().enumerate() {
         let gene_id = &gene_ids[gene_no];
-        result.insert(gene_id.to_string(), *cnt);
+        *result.entry(gene_id.to_string()).or_insert(0) += *cnt;
         total += cnt;
     }
     result.insert("_total".to_string(), total);
@@ -375,6 +394,7 @@ pub fn py_count_reads_stranded(
     index_filename: Option<&str>,
     trees: HashMap<String, (OurTree, Vec<String>)>,
     gene_trees: HashMap<String, (OurTree, Vec<String>)>,
+    each_read_counts_once: bool,
 ) -> Result<(HashMap<String, u32>, HashMap<String, u32>), BamError> {
     //check whether the bam file can be openend
     //and we need it for the chunking
@@ -387,24 +407,33 @@ pub fn py_count_reads_stranded(
         .into_par_iter()
         .map(|chunk| {
             let bam = open_bam(filename, index_filename).unwrap();
+            let (tree, gene_ids) = trees.get(&chunk.chr).unwrap();
 
             let both_counts = count_reads_in_region_stranded(
                 bam,
-                &trees.get(&chunk.chr).unwrap().0,
+                tree,
                 chunk.tid,
                 chunk.start,
                 chunk.stop,
-                chunk.gene_ids.len() as u32,
+                gene_ids.len() as u32,
+                each_read_counts_once,
             );
-            let both_counts = both_counts.unwrap_or_else(|_| (Vec::new(), Vec::new()));
+            let both_counts = both_counts.unwrap_or_else(|_| (Vec::new(), Vec::new(), 0));
 
-            (
-                to_hashmap(both_counts.0, &chunk.gene_ids, &chunk.chr),
-                to_hashmap(both_counts.1, &chunk.gene_ids, &chunk.chr),
-            )
+            let mut result = (
+                to_hashmap(both_counts.0, gene_ids, &chunk.chr),
+                to_hashmap(both_counts.1, gene_ids, &chunk.chr),
+            );
+            result.0.insert("_outside".to_string(), both_counts.2);
+            /*println!("Counting {}, {}, {}, {}, {}", &chunk.chr, chunk.start, chunk.stop,
+            *result.0.get("_total").unwrap_or(&0),
+            *result.1.get("_total").unwrap_or(&0),
+            );
+            */
+            result
         })
         .reduce(
-            || {(HashMap::<String, u32>::new(), HashMap::<String, u32>::new())},
+            || (HashMap::<String, u32>::new(), HashMap::<String, u32>::new()),
             add_dual_hashmaps,
         );
     //.fold(HashMap::<String, u32>::new(), add_hashmaps);

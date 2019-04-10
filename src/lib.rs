@@ -114,10 +114,12 @@ pub fn count_reads_stranded(
     index_filename: Option<&str>,
     intervals: &PyDict,
     gene_intervals: &PyDict,
+    each_read_counts_once: Option<bool>
 ) -> PyResult<(HashMap<String, u32>, HashMap<String, u32>)> {
     let trees = py_intervals_to_trees(intervals)?;
     let gene_trees = py_intervals_to_trees(gene_intervals)?;
-    let res =  match count_reads::py_count_reads_stranded(filename, index_filename, trees, gene_trees) {
+    let res =  match count_reads::py_count_reads_stranded(filename, index_filename, trees, gene_trees,
+                                                          each_read_counts_once.unwrap_or(false)) {
         Ok(x) => x,
         Err(y) => return Err(y.into()),
     };
