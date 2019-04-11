@@ -7,7 +7,7 @@ extern crate bio;
 
 //use failure::Error;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict};
+use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use pyo3::{exceptions, PyErr, PyResult};
 use std::collections::HashMap;
@@ -75,8 +75,9 @@ pub fn calculate_duplicate_distribution(
     }
 }
 // /convert the intervals into our interval trees
-fn py_intervals_to_trees(intervals: &PyDict) -> PyResult<HashMap<String, (count_reads::OurTree, Vec<String>)>> 
-{
+fn py_intervals_to_trees(
+    intervals: &PyDict,
+) -> PyResult<HashMap<String, (count_reads::OurTree, Vec<String>)>> {
     let trees: Result<HashMap<String, (count_reads::OurTree, Vec<String>)>, BamError> = intervals
         .iter()
         .map(|(chr, iv_obj)| {
@@ -99,14 +100,22 @@ pub fn count_reads_unstranded(
     index_filename: Option<&str>,
     intervals: &PyDict,
     gene_intervals: &PyDict,
+    each_read_counts_once: Option<bool>,
 ) -> PyResult<HashMap<String, u32>> {
     let trees = py_intervals_to_trees(intervals)?;
     let gene_trees = py_intervals_to_trees(gene_intervals)?;
-    match count_reads::py_count_reads_unstranded(filename, index_filename, trees, gene_trees) {
+    match count_reads::py_count_reads_unstranded(
+        filename,
+        index_filename,
+        trees,
+        gene_trees,
+        each_read_counts_once.unwrap_or(false),
+    ) {
         Ok(x) => Ok(x),
         Err(y) => Err(y.into()),
     }
 }
+
 /// python wrapper for py_count_reads_stranded
 #[pyfunction]
 pub fn count_reads_stranded(
@@ -114,12 +123,33 @@ pub fn count_reads_stranded(
     index_filename: Option<&str>,
     intervals: &PyDict,
     gene_intervals: &PyDict,
-    each_read_counts_once: Option<bool>
+    each_read_counts_once: Option<bool>,
 ) -> PyResult<(HashMap<String, u32>, HashMap<String, u32>)> {
     let trees = py_intervals_to_trees(intervals)?;
     let gene_trees = py_intervals_to_trees(gene_intervals)?;
-    let res =  match count_reads::py_count_reads_stranded(filename, index_filename, trees, gene_trees,
-                                                          each_read_counts_once.unwrap_or(false)) {
+    let res = match count_reads::py_count_reads_stranded(
+        filename,
+        index_filename,
+        trees,
+        gene_trees,
+        each_read_counts_once.unwrap_or(false),
+    ) {
+        Ok(x) => x,
+        Err(y) => return Err(y.into()),
+    };
+    Ok(res)
+}
+
+/// python wrapper for py_count_introns
+#[pyfunction]
+pub fn count_introns(
+    filename: &str,
+    index_filename: Option<&str>,
+) -> PyResult<count_reads::IntronResult> {
+    let res = match count_reads::py_count_introns(
+        filename,
+        index_filename,
+    ) {
         Ok(x) => x,
         Err(y) => return Err(y.into()),
     };
@@ -132,6 +162,7 @@ fn mbf_bam(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(calculate_duplicate_distribution))?;
     m.add_wrapped(wrap_pyfunction!(count_reads_unstranded))?;
     m.add_wrapped(wrap_pyfunction!(count_reads_stranded))?;
+    m.add_wrapped(wrap_pyfunction!(count_introns))?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())

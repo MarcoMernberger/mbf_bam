@@ -1,6 +1,6 @@
 use bio::data_structures::interval_tree::IntervalTree;
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyAny, PyTuple};
+use pyo3::types::{PyAny, PyList, PyTuple};
 use rayon::prelude::*;
 use rust_htslib::bam;
 use rust_htslib::prelude::*;
@@ -12,6 +12,7 @@ use rust_htslib::prelude::*;
 /// or being multi mapped
 ///
 use std::collections::{HashMap, HashSet};
+use std::str;
 
 use crate::bam_ext::{open_bam, BamRecordExtensions};
 use crate::BamError;
@@ -65,6 +66,11 @@ pub fn build_tree(iv_obj: &PyAny) -> Result<(OurTree, Vec<String>), PyErr> {
 ///
 ///counts the unstranded reads in a region,
 ///matching the to the tree entries.
+///
+///if each_read_counts_once is set, each read can count only for one gene - the first
+///one where a block hits
+///otherwise reads having blocks that can not be assigned to just one gene count for
+///all they're hitting
 fn count_reads_in_region_unstranded(
     mut bam: bam::IndexedReader,
     tree: &OurTree,
@@ -72,6 +78,7 @@ fn count_reads_in_region_unstranded(
     start: u32,
     stop: u32,
     gene_count: u32,
+    each_read_counts_once: bool,
 ) -> Result<(Vec<u32>, u32), BamError> {
     let mut result = vec![0; gene_count as usize];
     let mut multimapper_dedup: HashMap<u32, HashSet<Vec<u8>>> = HashMap::new();
@@ -121,6 +128,15 @@ fn count_reads_in_region_unstranded(
                         std::str::from_utf8(read.qname()).unwrap()
                     );
                     }*/
+                    if each_read_counts_once {
+                        break; // enable this (part 1 of 2) for each read hitting only once
+                    }
+                }
+                if each_read_counts_once {
+                    if hit {
+                        //enable this (part 2 of 2) for each read hitting only once
+                        break;
+                    }
                 }
             }
         }
@@ -234,22 +250,41 @@ fn count_reads_in_region_stranded(
 }
 
 struct ChunkedGenome {
-    trees: HashMap<String, (OurTree, Vec<String>)>,
+    trees: Option<HashMap<String, (OurTree, Vec<String>)>>,
     bam: bam::IndexedReader,
+    chromosomes: Vec<String>,
 }
 
 impl ChunkedGenome {
+    ///create a new chunked genome for iteration
+    ///if you pass in a tree, it is guranteed that the splits happen
+    ///between entries of the tree, not inside.
     fn new(
         trees: HashMap<String, (OurTree, Vec<String>)>,
         bam: bam::IndexedReader,
     ) -> ChunkedGenome {
-        ChunkedGenome { trees, bam }
+        ChunkedGenome {
+            chromosomes: trees.keys().map(|x| x.clone()).collect(),
+            trees: Some(trees),
+            bam,
+        }
     }
-
+    fn new_without_tree(bam: bam::IndexedReader) -> ChunkedGenome {
+        ChunkedGenome {
+            trees: None,
+            chromosomes: bam
+                .header()
+                .target_names()
+                .iter()
+                .map(|x| str::from_utf8(x).unwrap().to_string())
+                .collect(),
+            bam,
+        }
+    }
     fn iter(&self) -> ChunkedGenomeIterator {
         ChunkedGenomeIterator {
             cg: &self,
-            it: self.trees.keys(),
+            it: self.chromosomes.iter(),
             last_start: 0,
             last_tid: 0,
             last_chr_length: 0,
@@ -260,7 +295,7 @@ impl ChunkedGenome {
 
 struct ChunkedGenomeIterator<'a> {
     cg: &'a ChunkedGenome,
-    it: std::collections::hash_map::Keys<'a, String, (OurTree, Vec<String>)>,
+    it: std::slice::Iter<'a, String>,
     last_start: u32,
     last_chr: String,
     last_tid: u32,
@@ -290,23 +325,26 @@ impl<'a> Iterator for ChunkedGenomeIterator<'a> {
             self.last_start = 0;
         }
 
-        let (next_tree, _next_gene_ids) = self.cg.trees.get(&self.last_chr).unwrap();
         let mut stop = self.last_start + chunk_size;
-        loop {
-            //TODO: migh have to extend this for exon based counting to not
-            //cut gene in half?
-            //option 0 for that is to pass in the gene intervals as well
-            //just for constructing the chunks
-            //option 1 is to get the immediate left/right entrys (from the tree?)
-            //and if they have the same gene_no -> advance...
-            //right is easy, just find (stop..length) and take only the next()
-            //left is more difficult.
-            let overlapping = next_tree.find(stop..stop + 1).next();
-            match overlapping {
-                None => break,
-                Some(entry) => {
-                    let iv = entry.interval();
-                    stop = iv.end + 1;
+        if self.cg.trees.is_some() {
+            let (next_tree, _next_gene_ids) =
+                self.cg.trees.as_ref().unwrap().get(&self.last_chr).unwrap();
+            loop {
+                //TODO: migh have to extend this for exon based counting to not
+                //cut gene in half?
+                //option 0 for that is to pass in the gene intervals as well
+                //just for constructing the chunks
+                //option 1 is to get the immediate left/right entrys (from the tree?)
+                //and if they have the same gene_no -> advance...
+                //right is easy, just find (stop..length) and take only the next()
+                //left is more difficult.
+                let overlapping = next_tree.find(stop..stop + 1).next();
+                match overlapping {
+                    None => break,
+                    Some(entry) => {
+                        let iv = entry.interval();
+                        stop = iv.end + 1;
+                    }
                 }
             }
         }
@@ -327,6 +365,7 @@ pub fn py_count_reads_unstranded(
     index_filename: Option<&str>,
     trees: HashMap<String, (OurTree, Vec<String>)>,
     gene_trees: HashMap<String, (OurTree, Vec<String>)>,
+    each_read_counts_once: bool,
 ) -> Result<HashMap<String, u32>, BamError> {
     //check whether the bam file can be openend
     //and we need it for the chunking
@@ -349,6 +388,7 @@ pub fn py_count_reads_unstranded(
                 chunk.start,
                 chunk.stop,
                 gene_ids.len() as u32,
+                each_read_counts_once,
             );
             let mut total = 0;
             let mut outside = 0;
@@ -425,17 +465,90 @@ pub fn py_count_reads_stranded(
                 to_hashmap(both_counts.1, gene_ids, &chunk.chr),
             );
             result.0.insert("_outside".to_string(), both_counts.2);
-            /*println!("Counting {}, {}, {}, {}, {}", &chunk.chr, chunk.start, chunk.stop,
-            *result.0.get("_total").unwrap_or(&0),
-            *result.1.get("_total").unwrap_or(&0),
-            );
-            */
             result
         })
         .reduce(
             || (HashMap::<String, u32>::new(), HashMap::<String, u32>::new()),
             add_dual_hashmaps,
         );
+    //.fold(HashMap::<String, u32>::new(), add_hashmaps);
+    Ok(result)
+}
+
+type IntronsOnOneChromosome = HashMap<(u32, u32), u32>;
+pub type IntronResult = HashMap<String, IntronsOnOneChromosome>;
+
+fn combine_intron_results(mut a: IntronResult, b: IntronResult) -> IntronResult {
+    for (key, source) in b.iter() {
+        let target = &mut a
+            .entry(key.to_string())
+            .or_insert(HashMap::<(u32, u32), u32>::new());
+        for (coordinates, counts) in source.iter() {
+            *target.entry(*coordinates).or_insert(0) += counts;
+        }
+    }
+    a
+}
+
+fn count_introns(
+    mut bam: bam::IndexedReader,
+    tid: u32,
+    start: u32,
+    stop: u32,
+) -> Result<IntronsOnOneChromosome, BamError> {
+    let mut result = HashMap::new();
+    bam.fetch(tid, start, stop)?;
+    let mut read: bam::Record = bam::Record::new();
+    while let Ok(_) = bam.read(&mut read) {
+        // do not count multiple blocks matching in one gene multiple times
+        if ((read.pos() as u32) < start) || ((read.pos() as u32) >= stop) {
+            continue;
+        }
+        let mut intron_count = 0;
+        for (start, stop) in read.introns().iter() {
+            if stop < start {
+                panic!("stop < start")
+            }
+            *result.entry((*start, *stop)).or_insert(0 as u32) += 1;
+            intron_count += 1;
+        }
+        *result
+            .entry((std::u32::MAX, std::u32::MAX - intron_count))
+            .or_insert(0 as u32) += 1;
+    }
+    Ok(result)
+}
+
+/// find all introns from a bam
+/// result is a {Reference: {(start, stop): count}}
+///
+pub fn py_count_introns(
+    filename: &str,
+    index_filename: Option<&str>,
+) -> Result<IntronResult, BamError> {
+    //check whether the bam file can be openend
+    //and we need it for the chunking
+    let bam = open_bam(filename, index_filename)?;
+
+    //perform the counting
+    let cg = ChunkedGenome::new_without_tree(bam); // can't get the ParallelBridge to work with our lifetimes.
+    let it: Vec<Chunk> = cg.iter().collect();
+    let result = it
+        .into_par_iter()
+        .map(|chunk| {
+            let bam = open_bam(filename, index_filename).unwrap();
+
+            let introns = count_introns(bam, chunk.tid, chunk.start, chunk.stop);
+            let mut result: IntronResult = HashMap::new();
+            match introns {
+                Ok(introns) => {
+                    result.insert(chunk.chr.to_string(), introns);
+                }
+                Err(_) => (),
+            };
+            result
+        })
+        .reduce(|| IntronResult::new(), combine_intron_results);
     //.fold(HashMap::<String, u32>::new(), add_hashmaps);
     Ok(result)
 }

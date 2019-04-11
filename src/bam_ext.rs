@@ -2,29 +2,27 @@ use crate::BamError;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
 
-
-
 /// Wrapper for opening a BAM file.
 pub fn open_bam(
     bam_filename: &str,
     bai_filename: Option<&str>,
 ) -> Result<bam::IndexedReader, BamError> {
     let bam = match bai_filename {
-        Some(ifn) => 
-          bam::IndexedReader::from_path_and_index(bam_filename, ifn),
+        Some(ifn) => bam::IndexedReader::from_path_and_index(bam_filename, ifn),
         _ => bam::IndexedReader::from_path(bam_filename),
     };
     match bam {
-      Ok(x) => Ok(x),
-      Err(e) => 
-            Err(BamError::UnknownError {
-                msg: format!("Could not read bam: {}", e),
-            }
-            .into())
+        Ok(x) => Ok(x),
+        Err(e) => Err(BamError::UnknownError {
+            msg: format!("Could not read bam: {}", e),
+        }
+        .into()),
     }
 }
 pub trait BamRecordExtensions {
     fn blocks(&self) -> Vec<(u32, u32)>;
+    ///find intron positions (start, stop)
+    fn introns(&self) -> Vec<(u32, u32)>;
 }
 
 impl BamRecordExtensions for bam::Record {
@@ -44,6 +42,25 @@ impl BamRecordExtensions for bam::Record {
         }
         result
     }
+
+    fn introns(&self) -> Vec<(u32, u32)> {
+        let mut base_position = self.pos() as u32;
+        let mut result = Vec::new();
+        for entry in self.cigar().iter() {
+            match entry {
+                Cigar::Match(len) | Cigar::Del(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
+                    base_position += len
+                },
+                Cigar::RefSkip(len) => {
+                    let junc_start = base_position;
+                    base_position += len;
+                    result.push((junc_start, base_position));
+                },
+                _ => {}
+            }
+        }
+        result
+    }
 }
 
 #[cfg(test)]
@@ -54,7 +71,10 @@ mod tests {
 
     #[test]
     fn spliced_reads() {
-        let mut bam = bam::Reader::from_path("../mbf_sampledata/src/mbf_sample_data/data/mbf_bam/spliced_reads.bam").unwrap();
+        let mut bam = bam::Reader::from_path(
+            "../mbf_sampledata/src/mbf_sampledata/data/mbf_bam/spliced_reads.bam",
+        )
+        .unwrap();
         let mut it = bam.records();
         let blocks = it.next().expect("iter").unwrap().blocks();
         //6S45M - 0
@@ -381,5 +401,227 @@ mod tests {
         assert!(blocks[1] == (44589680, 44589703));
         //4S21M1696N23M2331N3M - 57
         assert!(blocks[2] == (44592034, 44592037));
+    }
+
+    #[test]
+    fn test_introns() {
+        let mut bam = bam::Reader::from_path(
+            "../mbf_sampledata/src/mbf_sampledata/data/mbf_bam/spliced_reads.bam",
+        )
+        .unwrap();
+        let mut it = bam.records();
+    
+        //6S45M - 0
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //7M2D44M - 1
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //29M2D22M - 2
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 3
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 4
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 5
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 6
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 7
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 8
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //6S45M - 9
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //41M10S - 10
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 11
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 12
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 13
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 14
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //9S42M - 15
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //51M - 16
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //50M1S - 17
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //45M6S - 18
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //3S48M - 19
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //42M9S - 20
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //13S38M - 21
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //44M7S - 22
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //5S46M - 23
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //23M4I24M - 24
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //18M1I32M - 25
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //17M2183N34M - 26
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17092783, 17094966));
+        //1M2183N50M - 27
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17092783, 17094966));
+        //1M2183N50M - 28
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17092783, 17094966));
+        //9S33M9S - 29
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //2S48M1S - 30
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //4S45M2S - 31
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //41M11832N10M - 32
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17566119, 17577951));
+        //11M11832N25M710N15M - 33
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17566119, 17577951));
+        assert_eq!(introns[1], (17577976, 17578686));
+        //8M11832N25M710N18M - 34
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17566119, 17577951));
+        assert_eq!(introns[1], (17577976, 17578686));
+        //8M11832N25M710N18M - 35
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17566119, 17577951));
+        assert_eq!(introns[1], (17577976, 17578686));
+        //8M11832N25M710N18M - 36
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17566119, 17577951));
+        assert_eq!(introns[1], (17577976, 17578686));
+        //8M11832N25M710N18M - 37
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17566119, 17577951));
+        assert_eq!(introns[1], (17577976, 17578686));
+        //7M11832N25M710N19M - 38
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17566119, 17577951));
+        assert_eq!(introns[1], (17577976, 17578686));
+        //6M11832N25M710N20M - 39
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17566119, 17577951));
+        assert_eq!(introns[1], (17577976, 17578686));
+        //6M11832N25M710N20M - 40
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17566119, 17577951));
+        assert_eq!(introns[1], (17577976, 17578686));
+        //1S44M1467N6M - 41
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17579777, 17581244));
+        //2M1514N48M95N1M - 42
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17581371, 17582885));
+        assert_eq!(introns[1], (17582933, 17583028));
+        //1M1514N48M95N2M - 43
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17581371, 17582885));
+        assert_eq!(introns[1], (17582933, 17583028));
+        //1M1514N48M95N2M - 44
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (17581371, 17582885));
+        assert_eq!(introns[1], (17582933, 17583028));
+        //1S22M95N28M - 45
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17582933, 17583028));
+        //37M538N13M1S - 46
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17588658, 17589196));
+        //37M538N13M1S - 47
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17588658, 17589196));
+        //37M538N13M1S - 48
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17588658, 17589196));
+        //1S25M1D25M - 49
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //24M1D24M3S - 50
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //16M1D28M7S - 51
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //11S7M1I32M - 52
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 0);
+        //5S9M1892N37M - 53
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17624021, 17625913));
+        //2S9M1892N40M - 54
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (17624021, 17625913));
+        //1S7M3D19M2285N24M - 55
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 1);
+        assert_eq!(introns[0], (31796729, 31799014));
+        //14M799N28M13881N7M2S - 56
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (36722706, 36723505));
+        assert_eq!(introns[1], (36723533, 36737414));
+        //4S21M1696N23M2331N3M - 57
+        let introns = it.next().unwrap().unwrap().introns();
+        assert_eq!(introns.len(), 2);
+        assert_eq!(introns[0], (44587984, 44589680));
+        assert_eq!(introns[1], (44589703, 44592034));
     }
 }
