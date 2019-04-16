@@ -301,6 +301,7 @@ struct ChunkedGenomeIterator<'a> {
     last_tid: u32,
     last_chr_length: u32,
 }
+#[derive(Debug)]
 struct Chunk {
     chr: String,
     tid: u32,
@@ -330,19 +331,18 @@ impl<'a> Iterator for ChunkedGenomeIterator<'a> {
             let (next_tree, _next_gene_ids) =
                 self.cg.trees.as_ref().unwrap().get(&self.last_chr).unwrap();
             loop {
-                //TODO: migh have to extend this for exon based counting to not
+                ////this has been adjusted not to cut genes in half
                 //cut gene in half?
                 //option 0 for that is to pass in the gene intervals as well
                 //just for constructing the chunks
-                //option 1 is to get the immediate left/right entrys (from the tree?)
-                //and if they have the same gene_no -> advance...
-                //right is easy, just find (stop..length) and take only the next()
-                //left is more difficult.
                 let overlapping = next_tree.find(stop..stop + 1).next();
                 match overlapping {
                     None => break,
                     Some(entry) => {
                         let iv = entry.interval();
+                        if iv.end + 1 < stop {
+                            panic!("WHAT?");
+                        }
                         stop = iv.end + 1;
                     }
                 }
@@ -374,45 +374,48 @@ pub fn py_count_reads_unstranded(
     //perform the counting
     let cg = ChunkedGenome::new(gene_trees, bam); // can't get the ParallelBridge to work with our lifetimes.
     let it: Vec<Chunk> = cg.iter().collect();
-    let result = it
-        .into_par_iter()
-        .map(|chunk| {
-            let bam = open_bam(filename, index_filename).unwrap();
-            let (tree, gene_ids) = trees.get(&chunk.chr).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new().build().unwrap();
+    pool.install(|| {
+        let result = it
+            .into_par_iter()
+            .map(|chunk| {
+                let bam = open_bam(filename, index_filename).unwrap();
+                let (tree, gene_ids) = trees.get(&chunk.chr).unwrap();
 
-            let counts = count_reads_in_region_unstranded(
-                bam,
-                //&chunk.tree,
-                tree,
-                chunk.tid,
-                chunk.start,
-                chunk.stop,
-                gene_ids.len() as u32,
-                each_read_counts_once,
-            );
-            let mut total = 0;
-            let mut outside = 0;
-            let mut result: HashMap<String, u32> = match counts {
-                Ok(counts) => {
-                    let mut res = HashMap::new();
-                    for (gene_no, cnt) in counts.0.iter().enumerate() {
-                        let gene_id = &gene_ids[gene_no];
-                        res.insert(gene_id.to_string(), *cnt);
-                        total += cnt;
+                let counts = count_reads_in_region_unstranded(
+                    bam,
+                    //&chunk.tree,
+                    tree,
+                    chunk.tid,
+                    chunk.start,
+                    chunk.stop,
+                    gene_ids.len() as u32,
+                    each_read_counts_once,
+                );
+                let mut total = 0;
+                let mut outside = 0;
+                let mut result: HashMap<String, u32> = match counts {
+                    Ok(counts) => {
+                        let mut res = HashMap::new();
+                        for (gene_no, cnt) in counts.0.iter().enumerate() {
+                            let gene_id = &gene_ids[gene_no];
+                            res.insert(gene_id.to_string(), *cnt);
+                            total += cnt;
+                        }
+                        outside += counts.1;
+                        res
                     }
-                    outside += counts.1;
-                    res
-                }
-                _ => HashMap::new(),
-            };
-            result.insert("_total".to_string(), total);
-            result.insert("_outside".to_string(), outside);
-            result.insert(format!("_{}", chunk.chr), total);
-            result
-        })
-        .reduce(HashMap::<String, u32>::new, add_hashmaps);
-    //.fold(HashMap::<String, u32>::new(), add_hashmaps);
-    Ok(result)
+                    _ => HashMap::new(),
+                };
+                result.insert("_total".to_string(), total);
+                result.insert("_outside".to_string(), outside);
+                result.insert(format!("_{}", chunk.chr), total);
+                result
+            })
+            .reduce(HashMap::<String, u32>::new, add_hashmaps);
+        //.fold(HashMap::<String, u32>::new(), add_hashmaps);
+        Ok(result)
+    })
 }
 
 fn to_hashmap(counts: Vec<u32>, gene_ids: &Vec<String>, chr: &str) -> HashMap<String, u32> {
@@ -443,36 +446,39 @@ pub fn py_count_reads_stranded(
     //perform the counting
     let cg = ChunkedGenome::new(gene_trees, bam); // can't get the ParallelBridge to work with our lifetimes.
     let it: Vec<Chunk> = cg.iter().collect();
-    let result = it
-        .into_par_iter()
-        .map(|chunk| {
-            let bam = open_bam(filename, index_filename).unwrap();
-            let (tree, gene_ids) = trees.get(&chunk.chr).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new().build().unwrap();
+    pool.install(|| {
+        let result = it
+            .into_par_iter()
+            .map(|chunk| {
+                let bam = open_bam(filename, index_filename).unwrap();
+                let (tree, gene_ids) = trees.get(&chunk.chr).unwrap();
 
-            let both_counts = count_reads_in_region_stranded(
-                bam,
-                tree,
-                chunk.tid,
-                chunk.start,
-                chunk.stop,
-                gene_ids.len() as u32,
-                each_read_counts_once,
-            );
-            let both_counts = both_counts.unwrap_or_else(|_| (Vec::new(), Vec::new(), 0));
+                let both_counts = count_reads_in_region_stranded(
+                    bam,
+                    tree,
+                    chunk.tid,
+                    chunk.start,
+                    chunk.stop,
+                    gene_ids.len() as u32,
+                    each_read_counts_once,
+                );
+                let both_counts = both_counts.unwrap_or_else(|_| (Vec::new(), Vec::new(), 0));
 
-            let mut result = (
-                to_hashmap(both_counts.0, gene_ids, &chunk.chr),
-                to_hashmap(both_counts.1, gene_ids, &chunk.chr),
+                let mut result = (
+                    to_hashmap(both_counts.0, gene_ids, &chunk.chr),
+                    to_hashmap(both_counts.1, gene_ids, &chunk.chr),
+                );
+                result.0.insert("_outside".to_string(), both_counts.2);
+                result
+            })
+            .reduce(
+                || (HashMap::<String, u32>::new(), HashMap::<String, u32>::new()),
+                add_dual_hashmaps,
             );
-            result.0.insert("_outside".to_string(), both_counts.2);
-            result
-        })
-        .reduce(
-            || (HashMap::<String, u32>::new(), HashMap::<String, u32>::new()),
-            add_dual_hashmaps,
-        );
-    //.fold(HashMap::<String, u32>::new(), add_hashmaps);
-    Ok(result)
+        //.fold(HashMap::<String, u32>::new(), add_hashmaps);
+        Ok(result)
+    })
 }
 
 type IntronsOnOneChromosome = HashMap<(u32, u32), u32>;
@@ -533,22 +539,25 @@ pub fn py_count_introns(
     //perform the counting
     let cg = ChunkedGenome::new_without_tree(bam); // can't get the ParallelBridge to work with our lifetimes.
     let it: Vec<Chunk> = cg.iter().collect();
-    let result = it
-        .into_par_iter()
-        .map(|chunk| {
-            let bam = open_bam(filename, index_filename).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new().build().unwrap();
+    pool.install(|| {
+        let result = it
+            .into_par_iter()
+            .map(|chunk| {
+                let bam = open_bam(filename, index_filename).unwrap();
 
-            let introns = count_introns(bam, chunk.tid, chunk.start, chunk.stop);
-            let mut result: IntronResult = HashMap::new();
-            match introns {
-                Ok(introns) => {
-                    result.insert(chunk.chr.to_string(), introns);
-                }
-                Err(_) => (),
-            };
-            result
-        })
-        .reduce(|| IntronResult::new(), combine_intron_results);
-    //.fold(HashMap::<String, u32>::new(), add_hashmaps);
-    Ok(result)
+                let introns = count_introns(bam, chunk.tid, chunk.start, chunk.stop);
+                let mut result: IntronResult = HashMap::new();
+                match introns {
+                    Ok(introns) => {
+                        result.insert(chunk.chr.to_string(), introns);
+                    }
+                    Err(_) => (),
+                };
+                result
+            })
+            .reduce(|| IntronResult::new(), combine_intron_results);
+        //.fold(HashMap::<String, u32>::new(), add_hashmaps);
+        Ok(result)
+    })
 }
