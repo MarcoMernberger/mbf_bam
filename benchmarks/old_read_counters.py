@@ -5,6 +5,26 @@ from mbf_genomics.genes.anno_tag_counts import (
     IntervalStrategyGene,
 )
 
+def get_interval_trees(interval_strategy, genome, chr):
+    import bx.intervals
+
+    by_chr = interval_strategy._get_interval_tuples_by_chr(genome)
+    tree_forward = bx.intervals.IntervalTree()
+    tree_reverse = bx.intervals.IntervalTree()
+    gene_to_no = {}
+    ii = 0
+    for tup in by_chr[chr]:  # stable_id, strand, [starts], [stops]
+        length = 0
+        for start, stop in zip(tup[2], tup[3]):
+            if tup[1] == 1:
+                tree_forward.insert_interval(bx.intervals.Interval(start, stop, ii))
+            else:
+                tree_reverse.insert_interval(bx.intervals.Interval(start, stop, ii))
+            length += stop - start
+        gene_stable_id = tup[0]
+        gene_to_no[gene_stable_id] = ii
+        ii += 1
+    return tree_forward, tree_reverse, gene_to_no
 
 class _CounterStrategyBase:
     cores_needed = 1
@@ -43,7 +63,7 @@ class CounterStrategyStranded(_CounterStrategyBase):
         # reads may hit multiple genes (think overlapping genes, where each could have generated the read)
         # multi aligned reads may count for multiple genes
         # but not for the same gene multiple times
-        tree_forward, tree_reverse, gene_to_no = interval_strategy.get_interval_trees(
+        tree_forward, tree_reverse, gene_to_no = get_interval_trees(interval_strategy,
             genome, chr
         )
 
@@ -126,7 +146,7 @@ class CounterStrategyUnstranded(_CounterStrategyBase):
         # reads may hit multiple genes (think overlapping genes, where each could have generated the read)
         # multi aligned reads may count for multiple genes
         # but not for the same gene multiple times
-        tree_forward, tree_reverse, gene_to_no = interval_strategy.get_interval_trees(
+        tree_forward, tree_reverse, gene_to_no = get_interval_trees(interval_strategy,
             genome, chr
         )
 
