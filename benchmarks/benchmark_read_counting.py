@@ -5,6 +5,15 @@ import time
 import pypipegraph as ppg
 import mbf_genomes
 import os
+from old_read_counters import (
+    GeneUnstrandedPython,
+    GeneStrandedPython,
+    ExonStrandedPython,
+    ExonUnstrandedPython,
+    ExonSmartUnstrandedPython,
+    ExonSmartStrandedPython
+)
+
 
 work_dir = Path("_benchmark_read_counting")
 work_dir.mkdir(exist_ok=True)
@@ -92,7 +101,7 @@ def in_python_unstranded():
     ppg.util.global_pipegraph = None
     dummy = Dummy(genome, bam_name)
     genes = mbf_genomics.genes.Genes(genome)
-    ac = mbf_genomics.genes.anno_tag_counts.GeneUnstrandedPython(dummy)
+    ac = GeneUnstrandedPython(dummy)
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
 
@@ -107,13 +116,14 @@ def in_rust_unstranded():
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
 
+
 def in_python_stranded():
     import mbf_genomics
 
     ppg.util.global_pipegraph = None
     dummy = Dummy(genome, bam_name)
     genes = mbf_genomics.genes.Genes(genome)
-    ac = mbf_genomics.genes.anno_tag_counts.GeneStrandedPython(dummy)
+    ac = GeneStrandedPython(dummy)
     ac.count_strategy.disable_sanity_check = True
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
@@ -130,13 +140,14 @@ def in_rust_stranded():
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
 
+
 def in_python_exon_stranded():
     import mbf_genomics
 
     ppg.util.global_pipegraph = None
     dummy = Dummy(genome, bam_name)
     genes = mbf_genomics.genes.Genes(genome)
-    ac = mbf_genomics.genes.anno_tag_counts.ExonStrandedPython(dummy)
+    ac = ExonStrandedPython(dummy)
     ac.count_strategy.disable_sanity_check = True
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
@@ -153,13 +164,14 @@ def in_rust_exon_stranded():
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
 
+
 def in_python_exon_smart_stranded():
     import mbf_genomics
 
     ppg.util.global_pipegraph = None
     dummy = Dummy(genome, bam_name)
     genes = mbf_genomics.genes.Genes(genome)
-    ac = mbf_genomics.genes.anno_tag_counts.ExonSmartStrandedPython(dummy)
+    ac = ExonSmartStrandedPython(dummy)
     ac.count_strategy.disable_sanity_check = True
     genes += ac
     return genes.df.set_index("gene_stable_id")[ac.columns[0]]
@@ -193,7 +205,10 @@ def check_results(py, rust):
     print("ok", ok, "err", err)
 
 
-for p in ("result_rust_exon_smart_stranded.pickle", "time_rust_exon_smart_stranded.txt"):
+for p in (
+    "result_rust_exon_smart_stranded.pickle",
+    "time_rust_exon_smart_stranded.txt",
+):
     p = Path(p)
     if p.exists():
         p.unlink()
@@ -215,5 +230,3 @@ check_results(py, rust)
 py = do_time("python_gene_unstranded", in_python_unstranded)
 rust = do_time("rust_gene_unstranded", in_rust_unstranded)
 check_results(py, rust)
-
-
