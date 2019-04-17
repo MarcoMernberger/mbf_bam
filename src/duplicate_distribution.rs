@@ -1,9 +1,9 @@
+use crate::bam_ext::open_bam;
 use failure::Error;
 use rayon::prelude::*;
 use rust_htslib::bam;
 use rust_htslib::prelude::*;
 use std::collections::HashMap;
-use crate::bam_ext::open_bam;
 
 fn add_hashmaps(mut a: HashMap<u32, u64>, b: HashMap<u32, u64>) -> HashMap<u32, u64> {
     for (k, v) in b.iter() {
@@ -48,36 +48,39 @@ pub fn py_calculate_duplicate_distribution(
     let bam = open_bam(filename, index_filename)?;
 
     let it = 0..bam.header().target_count();
-    let result = it
-        .into_par_iter()
-        .map(|tid| {
-            let mut bam2 = open_bam(filename, index_filename).unwrap();
-            
-            bam2.fetch(tid, 0, bam2.header().target_len(tid).unwrap())
-                .unwrap();
-            let mut counts: HashMap<u32, u64> = HashMap::new();
-            let mut read: bam::Record = bam::Record::new();
-            let mut reads_here: HashMap<ReadAtPos, u32> = HashMap::new();
-            let mut last_pos = -1;
-            while let Ok(_) = bam2.read(&mut read) {
-                //*counts.entry(9999999).or_insert(0) += 1; // record total
-                if read.pos() != last_pos {
-                    if last_pos != -1 {
-                        for (_k, v) in reads_here.iter() {
-                            *counts.entry(*v).or_insert(0) += 1;
+    let pool = rayon::ThreadPoolBuilder::new().build().unwrap();
+    pool.install(|| {
+        let result = it
+            .into_par_iter()
+            .map(|tid| {
+                let mut bam2 = open_bam(filename, index_filename).unwrap();
+
+                bam2.fetch(tid, 0, bam2.header().target_len(tid).unwrap())
+                    .unwrap();
+                let mut counts: HashMap<u32, u64> = HashMap::new();
+                let mut read: bam::Record = bam::Record::new();
+                let mut reads_here: HashMap<ReadAtPos, u32> = HashMap::new();
+                let mut last_pos = -1;
+                while let Ok(_) = bam2.read(&mut read) {
+                    //*counts.entry(9999999).or_insert(0) += 1; // record total
+                    if read.pos() != last_pos {
+                        if last_pos != -1 {
+                            for (_k, v) in reads_here.iter() {
+                                *counts.entry(*v).or_insert(0) += 1;
+                            }
+                            reads_here.clear();
                         }
-                        reads_here.clear();
+                        last_pos = read.pos();
                     }
-                    last_pos = read.pos();
+                    let key: ReadAtPos = ReadAtPos::from(&read); //(read.is_reverse(), read.raw_cigar().to_vec());
+                    *reads_here.entry(key).or_insert(0) += 1;
                 }
-                let key: ReadAtPos = ReadAtPos::from(&read); //(read.is_reverse(), read.raw_cigar().to_vec());
-                *reads_here.entry(key).or_insert(0) += 1;
-            }
-            for (_k, v) in reads_here.iter() {
-                *counts.entry(*v).or_insert(0) += 1;
-            }
-            counts
-        })
-        .reduce(HashMap::<u32, u64>::new, add_hashmaps);
-    Ok(result)
+                for (_k, v) in reads_here.iter() {
+                    *counts.entry(*v).or_insert(0) += 1;
+                }
+                counts
+            })
+            .reduce(HashMap::<u32, u64>::new, add_hashmaps);
+        Ok(result)
+    })
 }
