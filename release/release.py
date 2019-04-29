@@ -14,7 +14,7 @@ try:
 except (ImportError, AttributeError):
     print("please install mbf_bam before creating a release")
 
-if not Path('.git').exists():
+if not Path('../.git').exists():
     raise ValueError("Must be run from a git, not a mercurial repo")
 
 cmd = [
