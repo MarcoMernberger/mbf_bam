@@ -25,5 +25,6 @@ if __name__ == "__main__":
     setup(
         use_pyscaffold=True,
         rust_extensions=[RustExtension("mbf_bam.mbf_bam", 
-                                       binding=Binding.PyO3)],
+                                       binding=Binding.PyO3,
+                                       debug=False)],
     )

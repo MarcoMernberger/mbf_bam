@@ -26,6 +26,5 @@ features = ["extension-module"]
 
 
 [dependencies.rust-htslib]
-#path = "./rust-htslib"
 git = "https://github.com/rust-bio/rust-htslib/"
 
