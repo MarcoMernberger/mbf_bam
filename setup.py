@@ -23,8 +23,11 @@ except VersionConflict:
 
 if __name__ == "__main__":
     setup(
-        use_pyscaffold=True,
-        rust_extensions=[RustExtension("mbf_bam.mbf_bam", 
-                                       binding=Binding.PyO3,
-                                       debug=False)],
+        #use_pyscaffold={'git_describe_command': 
+                        #r'cat setup.cfg | grep "[metadata]" -A10 | grep "version ?=" | sed "s/version = //"'},
+        use_pyscaffold = True,
+        rust_extensions=[
+            RustExtension("mbf_bam.mbf_bam", binding=Binding.PyO3, debug=False)
+        ],
+
     )
