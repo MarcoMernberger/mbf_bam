@@ -263,8 +263,13 @@ impl ChunkedGenome {
         trees: HashMap<String, (OurTree, Vec<String>)>,
         bam: bam::IndexedReader,
     ) -> ChunkedGenome {
+        let chrs_in_tree_and_bam = trees
+            .keys()
+            .map(|x| x.clone())
+            .filter(|x| bam.header().tid(x.as_bytes()).is_some())
+            .collect();
         ChunkedGenome {
-            chromosomes: trees.keys().map(|x| x.clone()).collect(),
+            chromosomes: chrs_in_tree_and_bam,
             trees: Some(trees),
             bam,
         }
