@@ -8,12 +8,12 @@ except DistributionNotFound:  # pragma: no cover
 
 try:  # we need to ignore the import error (module not build) for poetry to be able to determine the version
     from .mbf_bam import *
+    from pathlib import Path
+    import pypipegraph as ppg
+    import pysam
+    import tempfile
 except ImportError:
     pass
-from pathlib import Path
-import pypipegraph as ppg
-import pysam
-import tempfile
 
 
 def reheader_and_rename_chromosomes(in_bam_file, out_bam_file, replacements):
