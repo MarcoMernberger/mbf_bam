@@ -4,6 +4,7 @@ try:
     __version__ = get_distribution(__name__).version
 except DistributionNotFound:  # pragma: no cover
     # package is not installed
+    __version__ = 'unknown'
     pass
 
 try:  # we need to ignore the import error (module not build) for poetry to be able to determine the version
