@@ -1,16 +1,19 @@
-from .mbf_bam import *
-from pathlib import Path
-import pypipegraph as ppg
-import pysam
-import tempfile
-
 from pkg_resources import get_distribution, DistributionNotFound
 
 try:
     __version__ = get_distribution(__name__).version
-except DistributionNotFound: # pragma: no cover
+except DistributionNotFound:  # pragma: no cover
     # package is not installed
     pass
+
+try:  # we need to ignore the import error (module not build) for poetry to be able to determine the version
+    from .mbf_bam import *
+except ImportError:
+    pass
+from pathlib import Path
+import pypipegraph as ppg
+import pysam
+import tempfile
 
 
 def reheader_and_rename_chromosomes(in_bam_file, out_bam_file, replacements):
@@ -36,6 +39,7 @@ def reheader_and_rename_chromosomes(in_bam_file, out_bam_file, replacements):
 def job_reheader_and_rename_chromosomes(input_bam_path, output_bam_path, replacements):
     input_path_bam = Path(input_bam_path)
     output_bam_path = Path(output_bam_path)
+
     def do_replace(replacements=replacements):
         reheader_and_rename_chromosomes(input_bam_path, output_bam_path, replacements)
 
