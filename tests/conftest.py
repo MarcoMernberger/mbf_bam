@@ -9,3 +9,4 @@ from pathlib import Path
 
 root = Path(__file__).parent.parent
 sys.path.append(str(root / "src"))
+from pypipegraph.testing.fixtures import new_pipegraph  # noqa:F401
