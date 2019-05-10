@@ -9,7 +9,6 @@
 """
 import sys
 
-
 from pkg_resources import require, VersionConflict
 from setuptools import setup
 
@@ -24,7 +23,7 @@ except VersionConflict:
 
 if __name__ == "__main__":
     setup(
-        rust_extensions=[
-            RustExtension("mbf_bam.mbf_bam", binding=Binding.PyO3, debug=False)
-        ],
+        rust_extensions=[RustExtension("mbf_bam.mbf_bam", 
+                                       binding=Binding.PyO3,
+                                       debug=False)],
     )
