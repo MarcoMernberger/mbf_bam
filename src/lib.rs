@@ -13,6 +13,7 @@ use pyo3::{exceptions, PyErr, PyResult};
 use std::collections::HashMap;
 
 mod bam_ext;
+mod bam_manipulation;
 mod count_reads;
 mod duplicate_distribution;
 
@@ -57,6 +58,30 @@ impl std::convert::From<rust_htslib::bam::FetchError> for BamError {
     fn from(_error: rust_htslib::bam::FetchError) -> BamError {
         BamError::UnknownError {
             msg: "Fetch error".to_string(),
+        }
+    }
+}
+
+impl std::convert::From<rust_htslib::bam::WriterPathError> for BamError {
+    fn from(_error: rust_htslib::bam::WriterPathError) -> BamError {
+        BamError::UnknownError {
+            msg: "Could not read file".to_string(),
+        }
+    }
+}
+
+impl std::convert::From<rust_htslib::bam::WriteError> for BamError {
+    fn from(_error: rust_htslib::bam::WriteError) -> BamError {
+        BamError::UnknownError {
+            msg: "WriteError".to_string(),
+        }
+    }
+}
+
+impl std::convert::From<rust_htslib::bam::index::IndexBuildError> for BamError {
+    fn from(_error: rust_htslib::bam::index::IndexBuildError) -> BamError {
+        BamError::UnknownError {
+            msg: "WriteError".to_string(),
         }
     }
 }
@@ -146,9 +171,24 @@ pub fn count_introns(
     filename: &str,
     index_filename: Option<&str>,
 ) -> PyResult<count_reads::IntronResult> {
-    let res = match count_reads::py_count_introns(
-        filename,
-        index_filename,
+    let res = match count_reads::py_count_introns(filename, index_filename) {
+        Ok(x) => x,
+        Err(y) => return Err(y.into()),
+    };
+    Ok(res)
+}
+///
+/// python wrapper for py_substract_bam
+#[pyfunction]
+pub fn substract_bam(
+    output_filename: &str,
+    minuend_filename: &str,
+    subtrahend_filename: &str,
+) -> PyResult<()> {
+    let res = match bam_manipulation::py_substract_bam(
+        output_filename,
+        minuend_filename,
+        subtrahend_filename,
     ) {
         Ok(x) => x,
         Err(y) => return Err(y.into()),
@@ -163,6 +203,7 @@ fn mbf_bam(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(count_reads_unstranded))?;
     m.add_wrapped(wrap_pyfunction!(count_reads_stranded))?;
     m.add_wrapped(wrap_pyfunction!(count_introns))?;
+    m.add_wrapped(wrap_pyfunction!(substract_bam))?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())
