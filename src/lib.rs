@@ -180,7 +180,7 @@ pub fn count_introns(
 ///
 /// python wrapper for py_substract_bam
 #[pyfunction]
-pub fn substract_bam(
+pub fn subtract_bam(
     output_filename: &str,
     minuend_filename: &str,
     subtrahend_filename: &str,
@@ -203,7 +203,7 @@ fn mbf_bam(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(count_reads_unstranded))?;
     m.add_wrapped(wrap_pyfunction!(count_reads_stranded))?;
     m.add_wrapped(wrap_pyfunction!(count_introns))?;
-    m.add_wrapped(wrap_pyfunction!(substract_bam))?;
+    m.add_wrapped(wrap_pyfunction!(subtract_bam))?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())
