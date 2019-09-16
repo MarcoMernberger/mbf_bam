@@ -1,6 +1,5 @@
 use crate::BamError;
 use rust_htslib::bam;
-use rust_htslib::bam::record::Cigar;
 use rust_htslib::bam::ext::BamRecordExtensions as htslib_record_extensions;
 
 /// Wrapper for opening a BAM file.
