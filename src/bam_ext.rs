@@ -1,6 +1,7 @@
 use crate::BamError;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
+use rust_htslib::bam::ext::BamRecordExtensions as htslib_record_extensions;
 
 /// Wrapper for opening a BAM file.
 pub fn open_bam(
@@ -27,39 +28,11 @@ pub trait BamRecordExtensions {
 
 impl BamRecordExtensions for bam::Record {
     fn blocks(&self) -> Vec<(u32, u32)> {
-        let mut result = Vec::new();
-        let mut pos = self.pos() as u32;
-        for entry in self.cigar().iter() {
-            match entry {
-                Cigar::Match(len) => {
-                    result.push((pos, pos + len));
-                    pos += len;
-                }
-                Cigar::Del(len) => pos += len,
-                Cigar::RefSkip(len) => pos += len,
-                _ => (),
-            }
-        }
-        result
+        self.aligned_blocks().iter().map(|x| (x[0] as u32, x[1] as u32)).collect()
     }
 
     fn introns(&self) -> Vec<(u32, u32)> {
-        let mut base_position = self.pos() as u32;
-        let mut result = Vec::new();
-        for entry in self.cigar().iter() {
-            match entry {
-                Cigar::Match(len) | Cigar::Del(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                    base_position += len
-                },
-                Cigar::RefSkip(len) => {
-                    let junc_start = base_position;
-                    base_position += len;
-                    result.push((junc_start, base_position));
-                },
-                _ => {}
-            }
-        }
-        result
+        htslib_record_extensions::introns(self).iter().map(|x| (x[0] as u32, x[1] as u32)).collect()
     }
 }
 
