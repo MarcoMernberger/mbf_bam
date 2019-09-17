@@ -1,15 +1,16 @@
-mod introns;
 mod chunked_genome;
 mod counters;
+mod introns;
+mod quantify;
 
-
-pub use counters::{py_count_reads_unstranded,py_count_reads_stranded};
+pub use counters::{py_count_reads_stranded, py_count_reads_unstranded};
 pub use introns::{py_count_introns, IntronResult};
+pub use quantify::py_quantify_gene_reads;
 
 use bio::data_structures::interval_tree::IntervalTree;
-use std::collections::{HashMap};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyList, PyTuple};
+use std::collections::HashMap;
 
 // OurTree stores an interval tree
 /// a gene_no (ie. an index into a vector of gene_ids)
@@ -41,8 +42,6 @@ pub fn build_tree(iv_obj: &PyAny) -> Result<(OurTree, Vec<String>), PyErr> {
     }
     Ok((tree, gene_ids))
 }
-
-
 
 fn add_hashmaps(mut a: HashMap<String, u32>, b: HashMap<String, u32>) -> HashMap<String, u32> {
     for (k, v) in b.iter() {

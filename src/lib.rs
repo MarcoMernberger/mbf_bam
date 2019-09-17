@@ -196,6 +196,29 @@ pub fn subtract_bam(
     Ok(res)
 }
 
+/// python wrapper for py_quantify_gene_reads
+#[pyfunction]
+pub fn quantify_gene_reads(
+    filename: &str,
+    index_filename: Option<&str>,
+    intervals: &PyDict,
+    gene_intervals: &PyDict,
+) -> PyResult<(HashMap<String, Vec<(u32,u32)>>, HashMap<String, Vec<(u32,u32)>>)> {
+    let trees = py_intervals_to_trees(intervals)?;
+    let gene_trees = py_intervals_to_trees(gene_intervals)?;
+    let res = match count_reads::py_quantify_gene_reads(
+        filename,
+        index_filename,
+        trees,
+        gene_trees,
+    ) {
+        Ok(x) => x,
+        Err(y) => return Err(y.into()),
+    };
+    Ok(res)
+}
+
+
 /// This module is a python module implemented in Rust.
 #[pymodule]
 fn mbf_bam(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -204,6 +227,7 @@ fn mbf_bam(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(count_reads_stranded))?;
     m.add_wrapped(wrap_pyfunction!(count_introns))?;
     m.add_wrapped(wrap_pyfunction!(subtract_bam))?;
+    m.add_wrapped(wrap_pyfunction!(quantify_gene_reads))?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())
