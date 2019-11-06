@@ -20,6 +20,13 @@ except VersionConflict:
     print("Error: version of setuptools is too old (<38.3)!")
     sys.exit(1)
 
+import subprocess 
+toolchains = subprocess.check_output(["rustup", "toolchain", "list"]).decode('utf-8').split("\n")
+nightlys = sorted([x[:x.find(' ') if x.find(' ') != -1 else None] for x in toolchains if x.startswith('nightly')])
+import os
+os.environ['RUSTUP_TOOLCHAIN'] = nightlys[0] # use the oldest one...
+print("USING", os.environ['RUSTUP_TOOLCHAIN'])
+
 
 if __name__ == "__main__":
     setup(
