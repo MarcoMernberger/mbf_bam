@@ -2,6 +2,7 @@ mod chunked_genome;
 mod counters;
 mod introns;
 mod quantify;
+pub mod by_barcode;
 
 pub use counters::{py_count_reads_stranded, py_count_reads_unstranded};
 pub use introns::{py_count_introns, IntronResult};

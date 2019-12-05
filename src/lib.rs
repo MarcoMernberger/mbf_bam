@@ -86,6 +86,21 @@ impl std::convert::From<rust_htslib::bam::index::IndexBuildError> for BamError {
     }
 }
 
+impl std::convert::From<std::io::Error> for BamError {
+    fn from(error: std::io::Error) -> BamError {
+        BamError::UnknownError {
+            msg: format!("IO Error: {:?}", error).to_string(),
+        }
+    }
+}
+impl std::convert::From<rust_htslib::bam::AuxWriteError> for BamError {
+    fn from(_error: rust_htslib::bam::AuxWriteError) -> BamError {
+        BamError::UnknownError {
+            msg: "AuxWriteError".to_string(),
+        }
+    }
+}
+
 #[pyfunction]
 /// calculate_duplicate_distribution(filename, (index_filename) /)
 /// --
@@ -164,6 +179,37 @@ pub fn count_reads_stranded(
     };
     Ok(res)
 }
+// python wrapper for py_count_reads_unstranded
+#[pyfunction]
+pub fn count_reads_primary_only_right_strand_only_by_barcode(
+    filename: &str,
+    index_filename: Option<&str>,
+    intervals: &PyDict,
+    gene_intervals: &PyDict,
+    umi_strategy: String,
+) -> PyResult<(
+    Vec<String>,
+    Vec<String>,
+    Vec<(u32, u32, u32)>
+    )>{
+    let trees = py_intervals_to_trees(intervals)?;
+    let gene_trees = py_intervals_to_trees(gene_intervals)?;
+    let umi_strategy = match umi_strategy.as_ref() {
+        "straight" => count_reads::by_barcode::UmiStrategy::Straight,
+        _ => return Err(BamError::UnknownError{msg: "invalid umi_strategy".to_string()}.into()),
+    };
+    match count_reads::by_barcode::py_count_reads_primary_only_right_strand_only_by_barcode(
+        filename,
+        index_filename,
+        trees,
+        gene_trees,
+        umi_strategy,
+    ) {
+        Ok(x) => Ok(x),
+        Err(y) => Err(y.into()),
+    }
+}
+
 
 /// python wrapper for py_count_introns
 #[pyfunction]
@@ -203,21 +249,38 @@ pub fn quantify_gene_reads(
     index_filename: Option<&str>,
     intervals: &PyDict,
     gene_intervals: &PyDict,
-) -> PyResult<(HashMap<String, Vec<(u32,u32)>>, HashMap<String, Vec<(u32,u32)>>)> {
+) -> PyResult<(
+    HashMap<String, Vec<(u32, u32)>>,
+    HashMap<String, Vec<(u32, u32)>>,
+)> {
     let trees = py_intervals_to_trees(intervals)?;
     let gene_trees = py_intervals_to_trees(gene_intervals)?;
-    let res = match count_reads::py_quantify_gene_reads(
-        filename,
-        index_filename,
-        trees,
-        gene_trees,
-    ) {
+    let res = match count_reads::py_quantify_gene_reads(filename, index_filename, trees, gene_trees)
+    {
         Ok(x) => x,
         Err(y) => return Err(y.into()),
     };
     Ok(res)
 }
 
+/// python wrapper for py_annotate_barcodes_from_fastq
+#[pyfunction]
+pub fn annotate_barcodes_from_fastq(
+    output_filename: &str,
+    input_filename: &str,
+    fastq2_filenames: Vec<&str>,
+    barcodes: Vec<(String, usize, usize)>,
+) -> PyResult<()> {
+    match bam_manipulation::py_annotate_barcodes_from_fastq(
+        output_filename,
+        input_filename,
+        fastq2_filenames,
+        barcodes,
+    ) {
+        Ok(x) => Ok(x),
+        Err(y) => return Err(y.into()),
+    }
+}
 
 /// This module is a python module implemented in Rust.
 #[pymodule]
@@ -225,9 +288,11 @@ fn mbf_bam(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(calculate_duplicate_distribution))?;
     m.add_wrapped(wrap_pyfunction!(count_reads_unstranded))?;
     m.add_wrapped(wrap_pyfunction!(count_reads_stranded))?;
+    m.add_wrapped(wrap_pyfunction!(count_reads_primary_only_right_strand_only_by_barcode))?;
     m.add_wrapped(wrap_pyfunction!(count_introns))?;
     m.add_wrapped(wrap_pyfunction!(subtract_bam))?;
     m.add_wrapped(wrap_pyfunction!(quantify_gene_reads))?;
+    m.add_wrapped(wrap_pyfunction!(annotate_barcodes_from_fastq))?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())

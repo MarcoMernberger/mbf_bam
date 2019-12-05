@@ -17,6 +17,7 @@ name = "mbf_bam"
 failure="0.1.5"
 rayon="1.0"
 bio = "0.25.0"
+flate2 = "1.0.13"
 #rust-htslib="0.22.0"
 
 

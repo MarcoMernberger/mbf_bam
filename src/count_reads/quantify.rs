@@ -12,7 +12,7 @@ use std::hash::Hash;
 ///
 ///
 /// Please note one single alignment only counts once for a gene
-/// but the same read being aligned multiple times will be counted multiple 
+/// but the same read being aligned multiple times will be counted multiple
 /// times.
 ///
 /// this is the high level distributo over chunks of chromosomes and aggregate

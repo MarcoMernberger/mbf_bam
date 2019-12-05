@@ -1,8 +1,8 @@
-use rust_htslib::bam;
-use std::str;
-use rust_htslib::prelude::*;
 use super::OurTree;
+use rust_htslib::bam;
+use rust_htslib::prelude::*;
 use std::collections::HashMap;
+use std::str;
 
 pub struct ChunkedGenome {
     trees: Option<HashMap<String, (OurTree, Vec<String>)>>,

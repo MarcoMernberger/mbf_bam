@@ -1,10 +1,10 @@
 use super::chunked_genome::{Chunk, ChunkedGenome};
 use crate::bam_ext::{open_bam, BamRecordExtensions};
+use crate::BamError;
 use rayon::prelude::*;
 use rust_htslib::bam;
 use rust_htslib::prelude::*;
-use std::collections::{HashMap};
-use crate::BamError;
+use std::collections::HashMap;
 
 type IntronsOnOneChromosome = HashMap<(u32, u32), u32>;
 pub type IntronResult = HashMap<String, IntronsOnOneChromosome>;

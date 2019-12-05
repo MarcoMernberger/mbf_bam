@@ -27,11 +27,17 @@ pub trait BamRecordExtensions {
 
 impl BamRecordExtensions for bam::Record {
     fn blocks(&self) -> Vec<(u32, u32)> {
-        self.aligned_blocks().iter().map(|x| (x[0] as u32, x[1] as u32)).collect()
+        self.aligned_blocks()
+            .iter()
+            .map(|x| (x[0] as u32, x[1] as u32))
+            .collect()
     }
 
     fn introns(&self) -> Vec<(u32, u32)> {
-        htslib_record_extensions::introns(self).iter().map(|x| (x[0] as u32, x[1] as u32)).collect()
+        htslib_record_extensions::introns(self)
+            .iter()
+            .map(|x| (x[0] as u32, x[1] as u32))
+            .collect()
     }
 }
 
@@ -382,7 +388,7 @@ mod tests {
         )
         .unwrap();
         let mut it = bam.records();
-    
+
         //6S45M - 0
         let introns = it.next().unwrap().unwrap().introns();
         assert_eq!(introns.len(), 0);
