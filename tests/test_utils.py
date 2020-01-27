@@ -28,3 +28,20 @@ class TestReheader:
             ppg.run_pipegraph()
         assert not Path("out.bam").exists()
         assert "No replacement happened" in str(j.exception)
+
+class TestSubtract:
+
+    def test_subtract_subset(self, new_pipegraph):
+        from mbf_sampledata import get_sample_path
+        from mbf_bam import subtract_bam
+
+        input = get_sample_path("mbf_align/chipseq_chr22.bam")
+        minued = get_sample_path("mbf_align/chipseq_chr22_subset_plus_unmapped.bam")
+        output = "output.bam"
+        print(input, input.exists())
+        print(minued, minued.exists())
+        subtract_bam(str(output), str(input.absolute()), str(minued.absolute()))
+        f = pysam.Samfile(output)
+        should = 80495
+        total = sum((x.total for x in f.get_index_statistics()))
+        assert should == total

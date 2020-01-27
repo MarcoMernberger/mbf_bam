@@ -24,8 +24,10 @@ pub fn py_substract_bam(
 
     let mut read: Record = Record::new();
     while let Ok(_) = subtrahend.read(&mut read) {
-        let q = read.qname().to_owned();
-        seen.insert(q);
+        if !read.is_unmapped() {
+            let q = read.qname().to_owned();
+            seen.insert(q);
+        }
     }
 
     {
